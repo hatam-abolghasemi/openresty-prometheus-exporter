@@ -13,7 +13,7 @@ upstream fix can be pulled by copying the file over. `LICENSE` is upstream's;
 upstream's packaging and tests, kept alongside for reference.
 
 - Upstream: https://github.com/knyar/nginx-lua-prometheus
-- Pinned at: <fill in the upstream commit/tag you vendored, e.g. v0.20240525>
+- Pinned at: bb9e6742022766eae6c05254b0ec654ed45012c0 (2026-09-09)
 
 Do not edit these files. This project's own code lives in `../../lib/` and
 `../../docker/`.
