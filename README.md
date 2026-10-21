@@ -11,9 +11,9 @@ reverse proxy, a forward proxy, and an L4 stream proxy; the metrics come from a
 set of OpenResty Lua modules, exposed on a Prometheus endpoint.
 
 > Requires OpenResty, or nginx built with `lua-nginx-module` — not stock nginx.
-> The easiest path is the prebuilt image below. Caller identity
-> (`source_service` / `source_namespace`) resolves on **Kubernetes**; under
-> plain Docker everything else works, you just don't get those two labels.
+> The easiest path is the prebuilt image. Caller identity (`source_service` /
+> `source_namespace`) resolves on **Kubernetes**; under plain Docker everything
+> else works, you just don't get those two labels.
 
 ---
 
@@ -28,60 +28,43 @@ shipping access logs somewhere and deriving metrics from them (more storage,
 more I/O, more delay, rarely cardinality-safe) or reaching for Istio/OpenTelemetry
 to get one slice of this. This gives you the whole picture from the proxy itself.
 
+Full catalog in the [metrics reference](docs/metrics-reference.md).
+
 ## Enable what you need — one tier at a time
 
-**1 — Inbound L7 (request metrics).** Use the prebuilt image as your nginx (it's
-OpenResty — programmable nginx, same config model), or add `lua-nginx-module` to
-your own nginx and drop in `lib/` + a few config lines. The image is the
-recommended path: easier to set up, easier to maintain, and smoke-tested on
-every build.
+Each tier is independent and additive. Click through for the step-by-step guide.
+
+| | Capability | Turn on with | Guide |
+|---|---|---|---|
+| **1** | **Inbound L7** — request metrics into your app | run the image | [Mode 1](docs/mode-1-inbound-l7.md) |
+| **2** | **Outbound L7** — egress metrics (HTTPS as `CONNECT host:port`) | `HTTP(S)_PROXY=127.0.0.1:3128` | [Mode 2](docs/mode-2-outbound-l7.md) |
+| **3** | **Outbound HTTPS details** — real route/status inside HTTPS | `INTERCEPT_TLS=on` + a CA | [Mode 3](docs/mode-3-outbound-https-interception.md) |
+| **4** | **L4 stream** — TCP/UDP (Redis, DB…) from the app's side | a `stream.conf` block | [Mode 4](docs/mode-4-stream-l4.md) |
 
 ```
 ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>
 ```
 
-**2 — Outbound L7 (egress metrics).** Point your app's `HTTP_PROXY` /
-`HTTPS_PROXY` at the sidecar's loopback forward proxy and its outbound calls get
-the same treatment:
-
-```
-HTTP_PROXY=http://127.0.0.1:3128
-HTTPS_PROXY=http://127.0.0.1:3128
-```
-
-Most libcurl-based clients honor these automatically (curl, Go, .NET); a few
-need a nudge — PHP-FPM needs `clear_env=no` (or `env[...]`) so workers see them,
-and Python `requests` / Java often need to be told explicitly.
-
-**3 — Real routes & status for outbound HTTPS.** By default HTTPS egress is
-recorded as `CONNECT host:port` (safe, and enough for many apps). To get the
-real method/route/status, enable interception: set `INTERCEPT_TLS=on`, mount a
-CA the sidecar signs with, and make your app trust that CA (for PHP that's one
-`curl.cainfo` line). The sidecar decrypts, records, and re-originates over
-**verified** TLS. See [ARCHITECTURE.md](ARCHITECTURE.md),
-"Seeing outgoing HTTPS details", for the per-language trust step (PHP and .NET
-samples included).
-
-**4 — L4 (TCP/UDP) observability.** Route a dependency (Redis, a database, …)
-through the sidecar's stream proxy and get connection counts, bytes in/out,
-session duration, and connect / first-byte timing — from your app's side —
-on a separate scrape target (`:9254`). Opt-in, per destination; append a small
-`stream.conf` block.
+**Already run OpenResty, or nginx with `lua-nginx-module`?** You don't need the
+image — drop the Lua modules into your existing server: [running on your own
+nginx](docs/standalone-nginx.md).
 
 ## Quick start
 
-Run it as a sidecar next to your app (K8s) or in front of it (any OpenResty
-deployment). A complete, mock-data Kubernetes example — ConfigMaps for
-`nginx.conf` / `default.conf` / `stream.conf`, a Deployment showing the
-app + nginx pair, and a Service/ServiceMonitor — is in
-[`examples/openresty-sidecar/`](examples/openresty-sidecar/). Replace every mock
-name/image/label, then scrape `:9145/metrics` (HTTP) and `:9254/metrics` (stream).
+Run it as a sidecar beside your app (K8s) or in front of it (any OpenResty), set
+`APP_PORT` to your app's port, and scrape `:9145/metrics` (HTTP) and
+`:9254/metrics` (stream). A complete, mock-data Kubernetes example — ConfigMaps,
+a Deployment showing the app + nginx pair, and a Service/ServiceMonitor — is in
+[`examples/openresty-sidecar/`](examples/openresty-sidecar/). The
+[docs index](docs/README.md) walks each mode from there.
 
-Prefer to use just the Lua modules on your own OpenResty? Add `lib/` (and the
-vendored library at `vendor/nginx-lua-prometheus/`) to `lua_package_path`, pull
-in the modules you want from your own `log_by_lua_block`, and edit
-`lib/metrics_config.lua` for your environment. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for what each module does.
+## Documentation
+
+- **[Documentation index](docs/README.md)** — all guides, start here
+- **Modes** — [1 Inbound](docs/mode-1-inbound-l7.md) · [2 Outbound](docs/mode-2-outbound-l7.md) · [3 HTTPS details](docs/mode-3-outbound-https-interception.md) · [4 Stream](docs/mode-4-stream-l4.md) · [own nginx](docs/standalone-nginx.md)
+- **[Metrics reference](docs/metrics-reference.md)** — every metric and label, with PromQL
+- **[Modules](docs/modules.md)** — maintainer's guide: what each `lib/` module does, why, how to change it
+- **[Architecture & internals](ARCHITECTURE.md)** — the design narrative
 
 ## Images & versioning
 
@@ -96,9 +79,9 @@ so you pick your OpenResty version directly:
 - `:latest` — newest base + newest exporter
 
 GitHub **Releases** (`vX.Y.Z`) are separate — they mark this project's own
-milestones (features, docs), independent of the OpenResty version. The image tag
-answers "which OpenResty am I on?"; the release answers "which version of the
-exporter's capabilities is this?".
+milestones, independent of the OpenResty version. The image tag answers "which
+OpenResty am I on?"; the release answers "which version of the exporter's
+capabilities is this?".
 
 ## Built on
 

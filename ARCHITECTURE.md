@@ -25,13 +25,10 @@ library:
   together; `k8s/` has a runnable, mock-data ConfigMaps + Deployment +
   Service/ServiceMonitor example.
 
-Tests live in `tests/*_test.lua` (one per pure module, using `luaunit` like
-upstream's own `prometheus_test.lua`):
-
-```
-luarocks install luaunit
-for f in tests/*_test.lua; do lua5.1 "$f" || exit 1; done
-```
+The six pure modules are unit-testable without a running nginx worker (they take
+values and return values); the orchestration modules are covered by the image's
+build-time smoke test. See [docs/modules.md](docs/modules.md#testing) for how to
+test each kind, and [docs/](docs/README.md) for the step-by-step mode guides.
 
 ## What each piece does
 
@@ -311,10 +308,10 @@ skips and the next one checks again.
 
 | Tag | Meaning |
 |---|---|
-| `ghcr.io/hatam-abolghasemi/nginx-lua-prometheus:<openresty-version>` | e.g. `1.31.1.1`: newest build for that OpenResty version |
-| `ghcr.io/hatam-abolghasemi/nginx-lua-prometheus:<upstream-tag>` | e.g. `1.31.1.1-4`: that docker-openresty release, rebuilt when this repo changes |
-| `ghcr.io/hatam-abolghasemi/nginx-lua-prometheus:<upstream-tag>-<sha7>` | immutable: that release + this commit |
-| `ghcr.io/hatam-abolghasemi/nginx-lua-prometheus:latest` | newest upstream release |
+| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-version>` | e.g. `1.31.1.1`: newest build for that OpenResty version |
+| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<upstream-tag>` | e.g. `1.31.1.1-4`: that docker-openresty release, rebuilt when this repo changes |
+| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<upstream-tag>-<sha7>` | immutable: that release + this commit |
+| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:latest` | newest upstream release |
 
 Pushes to `main` that touch the Lua or `docker/` rebuild the newest upstream
 release; `workflow_dispatch` builds any tag (OpenResty 1.31+, for native
