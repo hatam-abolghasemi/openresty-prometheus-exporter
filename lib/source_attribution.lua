@@ -9,7 +9,10 @@
 --      anything clearly external.
 --   2. For addresses in a configured dynamic range (e.g. a Kubernetes pod
 --      CIDR, too fast-churning for a static table), a reverse-DNS (PTR)
---      lookup against your cluster DNS, cached in a shared dict.
+--      lookup against your cluster DNS, cached in a shared dict. The
+--      lookup runs in a background timer, never on the request path: a
+--      cache miss returns the defaults at once and fills the cache for
+--      the next request.
 --   3. apply_waypoint_override() -- if the resolved caller turns out to BE
 --      a known service-mesh waypoint, recovers the real original caller's
 --      identity from a verified X-Forwarded-Client-Cert (XFCC) header
@@ -143,6 +146,8 @@ Resolver.__index = Resolver
 --   resolver_lib   = the resty.dns.resolver module (or a test double with
 --                    the same .new()/:query()/.TYPE_PTR shape). Defaults
 --                    to require("resty.dns.resolver") when omitted.
+--   spawn          = function(delay, fn) -> ok; schedules fn in the
+--                    background. Defaults to ngx.timer.at.
 -- }
 function _M.new_resolver(opts)
   assert(opts and opts.dict, "source_attribution.new_resolver requires opts.dict")
@@ -159,6 +164,8 @@ function _M.new_resolver(opts)
   self.default_service = opts.default_service or "unknown-caller"
   self.default_namespace = opts.default_namespace or "unknown"
   self.resolver_lib = opts.resolver_lib
+  -- background scheduler; ngx.timer.at by default, injectable for tests
+  self.spawn = opts.spawn or function(delay, fn) return ngx.timer.at(delay, fn) end
   return self
 end
 
@@ -168,47 +175,14 @@ local function ptr_query_name(ip)
   return d .. "." .. c .. "." .. b .. "." .. a .. ".in-addr.arpa"
 end
 
--- Resolves an IP to service, namespace. Order: static classification, then
--- cache, then (with an in-flight lock to avoid duplicate concurrent
--- queries for the same uncached IP) a live PTR lookup, caching the result.
--- Falls back to default_service/default_namespace whenever resolution
--- doesn't complete synchronously.
-function Resolver:resolve(ip)
-  if not ip then
-    return self.default_service, self.default_namespace
-  end
-
-  local static_svc, static_ns = _M.classify_static(ip, self.static_cfg)
-  if static_svc then
-    return static_svc, static_ns
-  end
-
-  local cached = self.dict:get(ip)
-  if cached then
-    local svc, ns = cached:match("^([^|]*)|(.*)$")
-    return svc, ns
-  end
-
-  local inflight_key = "inflight:" .. ip
-  if self.dict:get(inflight_key) then
-    -- someone else is already resolving this IP; don't pile on more
-    -- concurrent DNS queries for it
-    return self.default_service, self.default_namespace
-  end
-
-  local locked = self.dict:add(inflight_key, true, (self.dns.timeout_ms or 200) / 1000 + 1)
-  if not locked then
-    return self.default_service, self.default_namespace
-  end
-
-  local resolver_lib = self.resolver_lib
-  if not resolver_lib then
-    resolver_lib = require("resty.dns.resolver")
-  end
-
+-- Live PTR lookup + cache write. Runs ONLY in a background timer (never on
+-- the request path), so dns.timeout_ms bounds how long the timer waits on
+-- the DNS server, not how long any request waits.
+local function lookup_and_cache(self, ip, inflight_key)
   local svc, ns = self.default_service, self.default_namespace
   local query_name = ptr_query_name(ip)
   if query_name then
+    local resolver_lib = self.resolver_lib or require("resty.dns.resolver")
     local r = resolver_lib:new{
       nameservers = self.dns.nameservers,
       retrans     = self.dns.retrans or 1,
@@ -227,9 +201,48 @@ function Resolver:resolve(ip)
       end
     end
   end
-
   self.dict:set(ip, svc .. "|" .. ns, self.cache_ttl)
-  return svc, ns
+  self.dict:delete(inflight_key)
+end
+
+-- Resolves an IP to service, namespace WITHOUT ever blocking: static
+-- classification, then cache. On a cache miss it returns the defaults
+-- immediately and schedules the PTR lookup in a zero-delay background timer
+-- (with an in-flight lock so one uncached IP triggers at most one lookup);
+-- the next request from that IP hits the cache. Cost: the first request
+-- from a new/expired IP is labelled with the defaults.
+function Resolver:resolve(ip)
+  if not ip then
+    return self.default_service, self.default_namespace
+  end
+
+  local static_svc, static_ns = _M.classify_static(ip, self.static_cfg)
+  if static_svc then
+    return static_svc, static_ns
+  end
+
+  local cached = self.dict:get(ip)
+  if cached then
+    local svc, ns = cached:match("^([^|]*)|(.*)$")
+    return svc, ns
+  end
+
+  local inflight_key = "inflight:" .. ip
+  -- add() is atomic across workers: only the first miss schedules a lookup.
+  -- The lock's TTL is a safety net in case the timer never runs.
+  local locked = self.dict:add(inflight_key, true, (self.dns.timeout_ms or 200) / 1000 + 1)
+  if locked then
+    local ok = self.spawn(0, function(premature)
+      if premature then return end
+      lookup_and_cache(self, ip, inflight_key)
+    end)
+    if not ok then
+      -- timer pool exhausted: drop the lock so a later request retries
+      self.dict:delete(inflight_key)
+    end
+  end
+
+  return self.default_service, self.default_namespace
 end
 
 -- PTR-only lookup: no static classification, no shared-dict cache or

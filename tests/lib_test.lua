@@ -130,5 +130,65 @@ test("http labels: values follow schema order", function()
     end
 end)
 
+-- async resolver: never blocks, fills cache in the background
+do
+    local sa = require("source_attribution")
+    local function fake_dict()
+        local d = {}
+        return {
+            get = function(_, k) return d[k] end,
+            set = function(_, k, v) d[k] = v; return true end,
+            add = function(_, k, v) if d[k] ~= nil then return false end d[k] = v; return true end,
+            delete = function(_, k) d[k] = nil end,
+            raw = d,
+        }
+    end
+    local function make(answer)
+        local queued, queries = {}, 0
+        local lib = { TYPE_PTR = 12 }
+        function lib:new() return { query = function() queries = queries + 1; return answer end } end
+        local dict = fake_dict()
+        local r = sa.new_resolver{
+            dict = dict, resolver_lib = lib, dynamic_prefix = {10, 233},
+            default_service = "health-probe", default_namespace = "default",
+            spawn = function(_, fn) queued[#queued + 1] = fn; return true end,
+        }
+        return r, queued, function() return queries end, dict
+    end
+    local ip = "10.233.77.216"
+
+    test("resolver: miss returns defaults without querying DNS", function()
+        local r, queued, q = make({{ ptrdname = "10-233-1-2.orders.shop.svc.cluster.local." }})
+        local svc, ns = r:resolve(ip)
+        eq(svc, "health-probe"); eq(ns, "default")
+        eq(q(), 0); eq(#queued, 1)
+    end)
+    test("resolver: background lookup fills cache, next request hits it", function()
+        local r, queued, q, dict = make({{ ptrdname = "10-233-1-2.orders.shop.svc.cluster.local." }})
+        r:resolve(ip); queued[1](false)
+        eq(q(), 1); eq(dict.raw["inflight:" .. ip], nil)
+        local svc, ns = r:resolve(ip)
+        eq(svc, "orders"); eq(ns, "shop"); eq(#queued, 1)
+    end)
+    test("resolver: concurrent misses schedule one lookup", function()
+        local r, queued = make(nil)
+        r:resolve(ip); r:resolve(ip); r:resolve(ip)
+        eq(#queued, 1)
+    end)
+    test("resolver: failed lookup caches defaults", function()
+        local r, queued = make(nil)
+        r:resolve(ip); queued[1](false)
+        local svc = r:resolve(ip)
+        eq(svc, "health-probe"); eq(#queued, 1)
+    end)
+    test("resolver: spawn failure releases lock", function()
+        local dict = fake_dict()
+        local r = sa.new_resolver{ dict = dict, dynamic_prefix = {10, 233},
+            resolver_lib = { TYPE_PTR = 12 }, spawn = function() return nil, "too many" end }
+        r:resolve(ip)
+        eq(dict.raw["inflight:" .. ip], nil)
+    end)
+end
+
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

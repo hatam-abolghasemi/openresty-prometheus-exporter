@@ -129,7 +129,7 @@ return {
         default_namespace = "unknown",
 
         ptr_dns_server           = own_nameserver,  -- from /etc/resolv.conf; set an explicit IP to override
-        ptr_dns_timeout          = 200,   -- ms; kept tight, falls back to defaults on timeout
+        ptr_dns_timeout          = 2000,  -- ms; lookup runs in a background timer, never on the request path
         ptr_cache_ttl            = 15,    -- seconds, matches CoreDNS record TTL
         probe_default_service    = "health-probe",  -- fallback for unresolved dynamic-range addresses (often kubelet probes)
         probe_default_namespace  = "default",
