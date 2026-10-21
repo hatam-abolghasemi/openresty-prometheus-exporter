@@ -1,12 +1,16 @@
 name: Run Tests
 on:
   push:
+    paths:
+      - vendor/**
+      - .github/workflows/tests.yml
   pull_request:
+    paths:
+      - vendor/**
+      - .github/workflows/tests.yml
   schedule:
-    # Run tests weekly to make sure they keep working despite various
-    # dependency changes.
     - cron: '23 06 * * 5'
-  workflow_dispatch: # allow running manually
+  workflow_dispatch:
 jobs:
   lua:
     runs-on: ubuntu-latest
@@ -19,8 +23,6 @@ jobs:
       - uses: actions/setup-python@v2
       - run: sudo apt install libpcre2-dev libreadline-dev
       - run: pip install hererocks
-      # Install latest LuaRocks version plus the Lua version for this build job
-      # into 'here' subdirectory.
       - run: hererocks here -r^ --lua ${{ matrix.lua }}
       - run: echo $PWD/here/bin >> $GITHUB_PATH
       - run: eval `luarocks path --bin`
@@ -28,13 +30,16 @@ jobs:
       - run: luarocks install luacov-coveralls
       - run: luarocks install luaunit
       - run: luarocks install lrexlib-pcre2
-      - run: luacheck --globals ngx -- vendor/nginx-lua-prometheus/prometheus.lua vendor/nginx-lua-prometheus/prometheus_keys.lua vendor/nginx-lua-prometheus/prometheus_resty_counter.lua
-      - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- vendor/nginx-lua-prometheus/prometheus_test.lua
-      - run: lua -lluacov vendor/nginx-lua-prometheus/prometheus_test.lua
+      - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
+        working-directory: vendor/nginx-lua-prometheus
+      - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
+        working-directory: vendor/nginx-lua-prometheus
+      - run: lua -lluacov prometheus_test.lua
+        working-directory: vendor/nginx-lua-prometheus
       - run: luacov-coveralls --include ^prometheus
+        working-directory: vendor/nginx-lua-prometheus
         env:
           COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Only report test coverage for lua 5.1 to avoid doing it twice.
         if: ${{ matrix.lua == '5.1' }}
   integration:
     runs-on: ubuntu-latest
@@ -48,4 +53,4 @@ jobs:
         with:
           go-version: 1.22
       - run: go get
-      - run: ./test.sh
+      - run: chmod +x test.sh && ./test.sh
