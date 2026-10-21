@@ -5,6 +5,12 @@ Dated entries for this project's own code. The vendored library under
 
 ### 2026-10-21
 
+- **Grafana dashboard** in [`grafana/`](grafana/): a v2-schema dashboard
+  (Grafana 12+) with one tab per area — Summary, Request breakdown, Latency
+  percentiles, Last observed latency, Payload sizes, Connections, L4 streams.
+  Dashboard-wide filters are only data source and namespace; host, route and
+  status live on the tabs that use them (L4 streams lists stream status codes).
+  Linked from the README and the docs index.
 - **Every docker-openresty flavor, same tags.** The image workflow no longer
   builds only Alpine: for each release it reads the flavors and platforms
   upstream published on Docker Hub (alpine, alpine-slim, alpine-apk,

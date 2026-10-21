@@ -34,6 +34,7 @@ goes through outbound.
 |---|---|
 | [Modules](modules.md) | Every `lib/` module: purpose, why it's shaped that way, config keys, invariants, how to change/extend/test it safely |
 | [Metrics reference](metrics-reference.md) | Every metric and label, cardinality notes, example PromQL |
+| [Grafana dashboard](../grafana/) | Ready-to-import dashboard: summary, request breakdown, latency, payload sizes, connections, L4 streams |
 | [Architecture & internals](../ARCHITECTURE.md) | The design narrative — trust boundaries, identity discovery, cardinality strategy, the image |
 
 ## How the pieces fit

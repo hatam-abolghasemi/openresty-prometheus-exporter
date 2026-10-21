@@ -58,11 +58,15 @@ Deployment with inbound, outbound and stream on, a Service/ServiceMonitor, and
 a kustomization — is in [`examples/openresty-sidecar/`](examples/openresty-sidecar/).
 The [docs index](docs/README.md) walks each feature from there.
 
+Then import the [Grafana dashboard](grafana/): inbound, outbound, connections
+and L4 streams, one tab each.
+
 ## Documentation
 
 - **[Documentation index](docs/README.md)** — all guides, start here
 - **Features** — [inbound](docs/inbound.md) · [outbound](docs/outbound.md) · [https interception](docs/https-interception.md) · [stream](docs/stream.md) · [own nginx](docs/standalone-nginx.md)
 - **[Metrics reference](docs/metrics-reference.md)** — every metric and label, with PromQL
+- **[Grafana dashboard](grafana/)** — ready to import, one tab per area
 - **[Modules](docs/modules.md)** — maintainer's guide: what each `lib/` module does, why, how to change it
 - **[Architecture & internals](ARCHITECTURE.md)** — the design narrative
 - **[Changelog](CHANGELOG.md)**
