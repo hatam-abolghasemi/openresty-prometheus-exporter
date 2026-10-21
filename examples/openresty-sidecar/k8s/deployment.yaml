@@ -60,15 +60,18 @@ spec:
 
       # ── this fork's nginx sidecar ───────────────────────────────────────
       - name: nginx
-        # Build this image with ngx_http_proxy_connect_module baked in if
-        # you want the forward-proxy leg (FORK.md section 8) -- otherwise
-        # any recent stock OpenResty image works; just remove the
-        # 127.0.0.1:3128 server{} block from default.conf.
-        image: registry.example.com/example/openresty:1.27.1-egress-1  # mock
+        # The published image handles CONNECT with nginx's native tunnel
+        # module -- no custom build. To record decrypted outbound HTTPS, set
+        # INTERCEPT_TLS=on and mount a CA (ARCHITECTURE.md, "Seeing outgoing HTTPS
+        # details"); otherwise the forward proxy records CONNECT host:port.
+        image: registry.example.com/example/nginx-lua-prometheus:TAG  # mock
         imagePullPolicy: Always
         env:
         - name: TZ
           value: UTC
+        # Uncomment + mount an intercept CA to decrypt outbound HTTPS:
+        # - name: INTERCEPT_TLS
+        #   value: "on"
         ports:
         - name: http
           containerPort: 80

@@ -6,9 +6,7 @@ on:
   push:
     branches: [main]
     paths:
-      - prometheus.lua
-      - prometheus_keys.lua
-      - prometheus_resty_counter.lua
+      - vendor/**
       - lib/**
       - docker/**
       - .dockerignore
@@ -31,7 +29,6 @@ concurrency:
 env:
   UPSTREAM_REPO: https://github.com/openresty/docker-openresty.git
   BASE_IMAGE: openresty/openresty
-  IMAGE: ghcr.io/${{ github.repository }}
   PLATFORMS: linux/amd64
 
 jobs:
@@ -84,6 +81,7 @@ jobs:
           UPSTREAM_TAG: ${{ steps.resolve.outputs.upstream_tag }}
         run: |
           set -euo pipefail
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
           if ! docker buildx imagetools inspect "$BASE_IMAGE:$UPSTREAM_TAG-alpine" > /dev/null 2>&1; then
             echo "::notice::$BASE_IMAGE:$UPSTREAM_TAG-alpine is not on Docker Hub yet; checked again on the next run"
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -162,6 +160,7 @@ jobs:
       - name: Build and push
         run: |
           set -euo pipefail
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
           short_sha="${GIT_SHA::7}"
           tags=(-t "$IMAGE:$UPSTREAM_TAG" -t "$IMAGE:$UPSTREAM_TAG-$short_sha")
           [ "$IS_NEWEST_REVISION" = "true" ] && tags+=(-t "$IMAGE:$RESTY_VERSION")

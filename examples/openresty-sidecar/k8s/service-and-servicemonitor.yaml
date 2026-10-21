@@ -44,9 +44,9 @@ spec:
       app.kubernetes.io/name: example-app
       app.kubernetes.io/component: app
   endpoints:
-  - port: app             # HTTP request/connection metrics -- see FORK.md sections 1-9
+  - port: app             # HTTP request/connection metrics -- see ARCHITECTURE.md sections 1-9
     path: /metrics
     interval: 15s
-  - port: stream-metrics   # TCP/UDP proxy metrics -- see FORK.md section 10
+  - port: stream-metrics   # TCP/UDP proxy metrics -- see ARCHITECTURE.md section 10
     path: /metrics
     interval: 15s

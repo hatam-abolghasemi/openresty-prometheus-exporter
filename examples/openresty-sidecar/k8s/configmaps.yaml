@@ -39,7 +39,7 @@ data:
     # Reference top-level nginx.conf that wires default.conf (HTTP) and
     # stream.conf (TCP/UDP) together. Nothing in this file is fork-specific --
     # it's the plain skeleton every OpenResty deployment needs; default.conf and
-    # stream.conf are where this fork's actual additions live. See ../../FORK.md.
+    # stream.conf are where this fork's actual additions live. See ../../ARCHITECTURE.md.
     #
     # Deployment layout assumed:
     #   /etc/nginx/nginx.conf              (this file)
@@ -53,6 +53,7 @@ data:
     pid                           /run/nginx.pid;
     error_log                     /dev/stderr warn;
     include                       /etc/nginx/modules-enabled/*.conf;
+    include                       /etc/nginx/main.d/*.conf;
 
     events {
         worker_connections        1024;
@@ -101,7 +102,7 @@ data:
     # with caller identification, plus an outbound forward proxy sharing the
     # same metrics pipeline. All the actual logic lives in lib/http_metrics.lua
     # (orchestration) and lib/metrics_config.lua (everything you'd customize)
-    # -- this file is just wiring + the server{} blocks. See ../../FORK.md for
+    # -- this file is just wiring + the server{} blocks. See ../../ARCHITECTURE.md for
     # a full explanation of each piece: what it does, why, its requirements,
     # and how to verify it.
     #
@@ -131,27 +132,31 @@ data:
     log_by_lua_block         { require("http_metrics").record() }
 
     # ── outbound (forward-proxy) leg ──────────────────────────────────────────
-    # Loopback-only. Requires an OpenResty build patched with
-    # ngx_http_proxy_connect_module (not in stock OpenResty) -- see FORK.md
-    # section 8. Point the application container's HTTP_PROXY/HTTPS_PROXY at
-    # 127.0.0.1:3128 to route its outbound calls through here.
+    # Loopback-only. CONNECT (HTTPS) uses nginx's native tunnel module
+    # (tunnel_pass) in the OpenResty base -- no third-party module. Point the
+    # app container's HTTP_PROXY/HTTPS_PROXY at 127.0.0.1:3128. The tunnel
+    # target comes from lib/intercept.lua: the :3129 terminator when
+    # interception is on (INTERCEPT_TLS=on + a mounted CA), else the real
+    # host:port. See ARCHITECTURE.md, "Seeing outgoing HTTPS details".
     server {
-        set                            $request_mode 1;
-        listen                         127.0.0.1:3128;
-        resolver                       10.233.0.3 valid=10s;  -- replace with your CoreDNS ClusterIP
-        resolver_timeout               5s;
+        set                     $request_mode 1;
+        listen                  127.0.0.1:3128;
+        resolver                10.233.0.3 valid=10s;  # replace with your CoreDNS ClusterIP
+        resolver_timeout        5s;
 
-        proxy_connect;
-        proxy_connect_allow            all;  -- intentionally permissive: outbound TLS in this environment isn't confined to port 443, and plain HTTP requests already flow through location / below regardless of this setting -- see FORK.md section 8
-        proxy_connect_connect_timeout  10s;
-        proxy_connect_read_timeout     10s;
-        proxy_connect_send_timeout     10s;
+        tunnel_connect_timeout  10s;
+        tunnel_read_timeout     300s;
+        tunnel_send_timeout     300s;
 
         location / {
-            proxy_pass                 $scheme://$http_host$request_uri;
-            proxy_set_header           Host $http_host;
-            proxy_http_version         1.1;
-            proxy_set_header           Connection "";
+            set_by_lua_block $connect_upstream { return require("intercept").upstream() }
+            if ($request_method = CONNECT) {
+                tunnel_pass $connect_upstream;
+            }
+            proxy_pass          http://$http_host$request_uri;
+            proxy_set_header    Host $http_host;
+            proxy_http_version  1.1;
+            proxy_set_header    Connection "";
         }
     }
 
@@ -204,7 +209,7 @@ data:
     # counterpart to default.conf. All the actual logic lives in
     # lib/stream_metrics.lua (orchestration) and lib/metrics_config.lua
     # (everything you'd customize) -- this file is just wiring + the server{}
-    # blocks. See ../../FORK.md section 10 for a full explanation.
+    # blocks. See ../../ARCHITECTURE.md section 10 for a full explanation.
     #
     # nginx cannot share a shared dict between the http and stream modules (see
     # the upstream README's "Usage in stream module" caveat), so this keeps its

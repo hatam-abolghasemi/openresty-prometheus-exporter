@@ -1,14 +1,17 @@
-# Fork notes
+# Architecture & internals
 
-This is a fork of
-[knyar/nginx-lua-prometheus](https://github.com/knyar/nginx-lua-prometheus),
-a Prometheus metrics library for Nginx written in Lua, MIT licensed. Credit
-for the library itself — `prometheus.lua`, `prometheus_keys.lua`,
-`prometheus_resty_counter.lua`, and the counter/gauge/histogram API —
-belongs entirely to the upstream project. **None of those files are
-modified here**, so upstream releases still pull in cleanly.
+This is the technical breakdown of **openresty-prometheus-exporter**: what each
+piece does, why it exists, its requirements, how to verify it, and the
+assumptions it makes. For the product overview and quick start, see
+[`README.md`](README.md).
 
-What this fork adds on top is a reference sidecar deployment:
+The Prometheus client library underneath — `prometheus.lua`,
+`prometheus_keys.lua`, `prometheus_resty_counter.lua`, the
+counter/gauge/histogram API — is vendored **unmodified** from
+[knyar/nginx-lua-prometheus](https://github.com/knyar/nginx-lua-prometheus)
+(MIT) under [`vendor/`](vendor/nginx-lua-prometheus/); credit for it is
+entirely upstream's. Everything below is this project's own work on top of that
+library:
 
 - **`lib/`** — nine small Lua modules. Six are pure logic with no
   environment-specific values (`route_sanitizer`, `host_classifier`,
@@ -135,36 +138,102 @@ sidecar into an HTTP/HTTPS forward proxy for the app container's *outbound*
 traffic, sharing the same metrics pipeline via the `mode` label (`0` =
 inbound, `1` = outbound). Point `HTTP_PROXY`/`HTTPS_PROXY` at it and any
 compliant HTTP client routes through automatically. Plain HTTP gets full
-method/route/status/timing; HTTPS arrives as `CONNECT host:port` and, since
-TLS stays end-to-end encrypted, only the `host:port` is visible — that's a
-deliberate scope limit, not a bug: real payload visibility would need a MITM
-TLS termination, a much heavier security decision this proxy doesn't make.
+method/route/status/timing. HTTPS arrives as `CONNECT host:port`; by default
+TLS stays end-to-end and only the `host:port` is recorded — enough for many
+apps, and the safe default. When you need the real method/route/status of
+outbound HTTPS, enable interception (below).
 
-Handling `CONNECT` needs `ngx_http_proxy_connect_module`, which isn't in
-stock nginx/OpenResty — build it in:
+`CONNECT` is handled by nginx's native `ngx_http_tunnel_module` (`tunnel_pass`),
+present in the OpenResty base this image builds on — no third-party module and
+no custom build. The `:3128` server's only app-visible knob is its tunnel
+target, read from `lib/intercept.lua`:
 
 ```
-docker build \
-  --build-arg RESTY_VERSION="1.27.1.2" \
-  --build-arg RESTY_ADD_PACKAGE_BUILDDEPS="git patch" \
-  --build-arg RESTY_EVAL_PRE_CONFIGURE="cd /tmp && git clone https://github.com/chobits/ngx_http_proxy_connect_module.git" \
-  --build-arg RESTY_CONFIG_OPTIONS_MORE="--add-module=/tmp/ngx_http_proxy_connect_module" \
-  --build-arg RESTY_EVAL_PRE_MAKE="cd /tmp/openresty-1.27.1.2 && patch -d build/nginx-1.27.1 -p1 < /tmp/ngx_http_proxy_connect_module/patch/proxy_connect_rewrite_102101.patch" \
-  -f alpine/Dockerfile \
-  -t your-registry/openresty:1.27.1.2-egress-0.1 \
-  .
+set_by_lua_block $connect_upstream { return require("intercept").upstream() }
+if ($request_method = CONNECT) { tunnel_pass $connect_upstream; }
 ```
 
-The patch filename must match the nginx core version bundled in
-`RESTY_VERSION` — check `ngx_http_proxy_connect_module`'s `patch/` directory
-for the right one, and re-check on every version bump; a mismatch fails the
-build outright rather than silently.
+With interception off, `upstream()` returns the real `host:port` — identical to
+a bare `tunnel_pass;`.
 
-> ⚠️ `proxy_connect_allow all` is deliberate, not an oversight: it only
-> gates which ports `CONNECT` (HTTPS tunneling) may target, and outbound TLS
-> in this environment isn't confined to port 443. Narrowing it to `443`
-> would silently break egress to anything listening on another TLS port —
-> only do that if your environment's outbound TLS genuinely never leaves 443.
+### Seeing outgoing HTTPS details (optional interception)
+
+When `CONNECT host:port` isn't enough and you need the real method, route and
+status of outbound HTTPS, the sidecar can intercept it: a loopback terminator
+(`127.0.0.1:3129`, baked into the image via `conf.d/intercept.conf` +
+`lib/tls_intercept.lua`) mints a per-SNI leaf cert signed by a CA you provide,
+records the decrypted request, and re-originates to the real destination over a
+**verified** TLS connection (`proxy_ssl_verify on`). Off unless turned on, per
+app. All the machinery is baked in; a deployment enables it with one env var and
+a mounted CA.
+
+**On the sidecar** (nginx container): set `INTERCEPT_TLS=on` and mount a CA
+keypair at `/etc/nginx/intercept/ca.crt` + `ca.key` (nginx only — the app never
+gets the key). Optional: `INTERCEPT_TLS_PORTS` (comma list, default `443`) and
+`INTERCEPT_BYPASS` (hosts to leave as plain CONNECT — outbound-mTLS or
+cert-pinned destinations). The switches are declared for workers in the baked
+`main.d/intercept-env.conf`, so `nginx.conf` needs no change.
+
+**On the app** — two things, and only the second differs per language:
+
+1. *Route egress through the proxy.* Set `HTTP_PROXY`/`HTTPS_PROXY` (and the
+   lowercase forms) to `http://127.0.0.1:3128`. If you already use the forward
+   proxy in CONNECT mode, this is done.
+2. *Trust the CA*, or the client rejects the minted cert:
+
+   | runtime | trust the CA via |
+   |---|---|
+   | libcurl / curl | `CURL_CA_BUNDLE`, or PHP `curl.cainfo` |
+   | Python `requests` | `REQUESTS_CA_BUNDLE` |
+   | Node.js | `NODE_EXTRA_CA_CERTS` *(appends)* |
+   | Go | `SSL_CERT_FILE` / `SSL_CERT_DIR` |
+   | .NET | OS trust store (`update-ca-certificates`), or `SSL_CERT_FILE` / `SSL_CERT_DIR` |
+   | Java | `keytool -import` into the JVM truststore |
+   | generic OpenSSL | `SSL_CERT_FILE` / `SSL_CERT_DIR` |
+
+> **Replace vs append.** Most of these (`curl.cainfo`, `REQUESTS_CA_BUNDLE`,
+> `SSL_CERT_FILE`) *replace* the trust store, so the client then trusts **only**
+> your CA — complete when every TLS destination it reaches is intercepted
+> (proxy-only egress, all on an intercepted port, nothing bypassed). If the same
+> client also reaches TLS you don't intercept, give it a combined bundle (system
+> CAs + your CA) or use an appending mechanism (`NODE_EXTRA_CA_CERTS`, or the OS
+> trust store via `update-ca-certificates`).
+
+**PHP (php-fpm).** Trust the CA in `php.ini`, mount `ca.crt` (cert only) into the
+app at `/etc/intercept/ca.crt`, and make sure the proxy vars reach the workers
+(`clear_env = no` in `www.conf`, inheriting the container env, or
+`env[HTTPS_PROXY] = ...` explicitly):
+
+```ini
+[curl]
+curl.cainfo = /etc/intercept/ca.crt
+```
+
+`curl.cainfo` only affects libcurl, so PDO/MySQL TLS and the like are untouched.
+
+**.NET.** `HttpClient` reads `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` from the
+environment automatically (Linux, .NET Core 3.1+), so egress routing needs no
+code. For trust, .NET validates against the OS store via OpenSSL: add your CA to
+it — copy `ca.crt` into `/usr/local/share/ca-certificates/` and run
+`update-ca-certificates` in the app image (this *appends*, so public TLS keeps
+working) — or point `SSL_CERT_FILE` at a bundle that includes your CA (replace
+caveat above). Don't reach for a per-call
+`ServerCertificateCustomValidationCallback` that returns `true`: that disables
+verification instead of trusting your CA.
+
+**The CA.** One per namespace, key in a Secret, never in git:
+
+```
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout ca.key -out ca.crt -subj "/CN=<namespace>-intercept-ca"
+kubectl -n <namespace> create secret generic intercept-ca \
+  --from-file=ca.crt=ca.crt --from-file=ca.key=ca.key
+```
+
+Mount that Secret into nginx (`ca.crt`+`ca.key`) and, with `subPath: ca.crt`,
+into the app (cert only). Rotate by recreating the Secret and restarting the
+pod. The CA is a trust anchor — whoever holds the key can impersonate any site
+to every pod that trusts it — so scope it to one namespace with tight RBAC.
 
 ### Stream (TCP/UDP) proxy metrics
 
@@ -191,20 +260,20 @@ is opt-out, not opt-in, so a new destination gets metrics by default.
 
 ---
 
-## Known issue corrected in this fork
+## Known issue corrected in this project
 
 Upstream's version of this config hardcoded the `/metrics` endpoint's own
 connection-metric labels as string literals that had drifted from the
 `app`/`namespace` values used everywhere else — silently splitting one
-time series into two. This fork reads them from `metrics_config.lua`
+time series into two. This project reads them from `metrics_config.lua`
 consistently instead. If you maintain copies of this config elsewhere,
 check for the same drift.
 
 ---
 
-## Using this fork
+## Using this project
 
-**Just the library, no additions** — this fork behaves exactly like
+**Just the library, no additions** — this project behaves exactly like
 upstream; point `lua_package_path` at the repo root and use `prometheus.lua`
 directly. See the upstream `README.md` above for the full API.
 
@@ -213,8 +282,10 @@ the repo root, then either pull in one module you want (they're all
 independent — e.g. `require("route_sanitizer").sanitize(ngx.var.request_uri)`
 in your own `log_by_lua_block`), or copy `default.conf`/`stream.conf`
 as-is and edit `lib/metrics_config.lua` for your environment (app/namespace
-names, `static_ranges`, `ptr_dns_server`, `cluster_ip_prefix`). Build the
-patched OpenResty image first if you want the forward-proxy leg.
+names, `static_ranges`, `ptr_dns_server`, `cluster_ip_prefix`). The
+forward-proxy leg works out of the box — CONNECT uses nginx's native tunnel
+module, no patched build; to decrypt outbound HTTPS see "Seeing outgoing HTTPS
+details".
 
 **As a Kubernetes sidecar** — `examples/openresty-sidecar/k8s/` has a
 complete, mock-data example: ConfigMaps for `nginx.conf`/`default.conf`/
@@ -289,28 +360,30 @@ docker buildx build --build-arg OPENRESTY_TAG=1.31.1.1-4 \
 
 ---
 
-## Fork changelog
+## Changelog
 
-Dated entries for this fork's own additions. Upstream's `CHANGELOG.md` is
+Dated entries for this project's own additions. Upstream's `CHANGELOG.md` is
 unaffected — none of its files are touched here.
 
 >### 2026-10-20
 
-- Forward proxy can now optionally **intercept HTTPS** to record real
-  method/route/status instead of only `CONNECT host:port`. A CONNECT to an
-  intercepted TLS port is tunnelled to a loopback terminator (`127.0.0.1:3129`)
-  that mints a per-SNI leaf cert (`lib/tls_intercept.lua`, signed by a mounted
-  CA), reads the decrypted request, and re-originates to the true destination
-  over a **verified** TLS connection (`proxy_ssl_verify on`). Off by default:
-  with no `/etc/nginx/intercept/ports/*.map` entry mounted, `$tls_port` is
-  always 0, nothing routes to `:3129`, and the image stays a transparent
-  pass-through proxy. The intercepted outer CONNECT is not double-counted --
-  `record()` skips it (`$do_intercept`), so each call is counted once at
-  `:3129`. The CA key is mounted into the nginx container only; the app trusts
-  `ca.crt` alone. `examples/.../k8s/` gains a runnable PHP test
-  (`intercept-php-test.yaml`). Known limits (deferred): only configured TLS
-  ports are intercepted (443 to start) and re-originated on their default port;
-  outbound mTLS / cert-pinning destinations need a `bypass/*.map` entry.
+- **Optional HTTPS interception** for the forward proxy — record the real
+  method/route/status of outbound HTTPS instead of only `CONNECT host:port`.
+  The machinery is baked into the image: `lib/intercept.lua` (the per-CONNECT
+  decision), `conf.d/intercept.conf` (the `ssl_mint_cache` dict and the
+  `127.0.0.1:3129` TLS terminator, which mints per-SNI leaf certs via
+  `lib/tls_intercept.lua` and re-originates over verified TLS), and
+  `main.d/intercept-env.conf` (declares the env switches for workers). An app's
+  `default.conf` opts in with one line in its `:3128` block —
+  `tunnel_pass $connect_upstream;` fed by `require("intercept").upstream()` —
+  so no maps, dict or `:3129` server live in `default.conf`. Off by default:
+  with `INTERCEPT_TLS` unset the proxy passes CONNECT through unchanged and
+  `:3129` stays idle. Enable per deployment with `INTERCEPT_TLS=on` plus a
+  mounted CA (nginx gets `ca.crt`+`ca.key`; the app trusts `ca.crt`); ports
+  default to 443 (`INTERCEPT_TLS_PORTS`), mTLS/pinned hosts go in
+  `INTERCEPT_BYPASS`. `record()` counts each call once via `intercept.should()`,
+  so routing and metrics share one decision. See "Seeing outgoing HTTPS
+  details".
 
 ### 2026-10-19
 

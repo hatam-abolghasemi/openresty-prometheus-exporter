@@ -1,0 +1,36 @@
+name: Release
+
+# Project releases are decoupled from image tags. Image tags track the
+# OpenResty base (<openresty-tag>, <openresty-tag>-<sha>, latest); a GitHub
+# Release marks a milestone of THIS project's capabilities. Cut one by pushing
+# a SemVer tag:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --notes-file - <<'NOTE'
+          Images for every OpenResty base are published continuously by the
+          "OpenResty image" workflow — pull by the OpenResty version you target:
+
+              ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>
+
+          Pin `:<openresty-tag>-<short-sha>` in production for an immutable build.
+          NOTE

@@ -28,9 +28,9 @@ jobs:
       - run: luarocks install luacov-coveralls
       - run: luarocks install luaunit
       - run: luarocks install lrexlib-pcre2
-      - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
-      - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
-      - run: lua -lluacov prometheus_test.lua
+      - run: luacheck --globals ngx -- vendor/nginx-lua-prometheus/prometheus.lua vendor/nginx-lua-prometheus/prometheus_keys.lua vendor/nginx-lua-prometheus/prometheus_resty_counter.lua
+      - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- vendor/nginx-lua-prometheus/prometheus_test.lua
+      - run: lua -lluacov vendor/nginx-lua-prometheus/prometheus_test.lua
       - run: luacov-coveralls --include ^prometheus
         env:
           COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 10
     defaults:
       run:
-        working-directory: integration
+        working-directory: vendor/nginx-lua-prometheus/integration
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-go@v2

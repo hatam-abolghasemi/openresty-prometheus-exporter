@@ -1,8 +1,7 @@
 *
-!prometheus.lua
-!prometheus_keys.lua
-!prometheus_resty_counter.lua
 !lib
 !lib/**
 !docker
 !docker/**
+!vendor
+!vendor/**

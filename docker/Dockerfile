@@ -7,7 +7,10 @@ FROM openresty/openresty:${OPENRESTY_TAG}-alpine
 RUN apk add --no-cache openssl ca-certificates \
  && update-ca-certificates
 
-COPY prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua /opt/prometheus/
+COPY vendor/nginx-lua-prometheus/prometheus.lua \
+     vendor/nginx-lua-prometheus/prometheus_keys.lua \
+     vendor/nginx-lua-prometheus/prometheus_resty_counter.lua \
+     /opt/prometheus/
 COPY lib/ /opt/prometheus/lib/
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/main.d/ /etc/nginx/main.d/
