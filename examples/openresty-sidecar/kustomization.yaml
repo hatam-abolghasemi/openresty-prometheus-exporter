@@ -1,0 +1,28 @@
+# App + openresty-prometheus-exporter sidecar, all features on except https
+# interception. Mock names throughout -- replace them, then:
+#
+#   kubectl apply -k examples/openresty-sidecar/
+#
+# The image already carries nginx.conf, the inbound/outbound servers and every
+# lib/ module, so only what differs per deployment is mounted: the stream
+# feature's config and, optionally, your own metrics_config.lua.
+namespace: example-namespace
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  - name: sidecar-stream
+    files:
+      - stream-enable.conf
+      - stream.conf
+  # To tune metrics/labels: copy lib/metrics_config.lua next to this file,
+  # edit it, uncomment below and the matching mount in deployment.yaml.
+  # - name: sidecar-metrics-config
+  #   files:
+  #     - metrics_config.lua
+
+generatorOptions:
+  labels:
+    app.kubernetes.io/name: example-app

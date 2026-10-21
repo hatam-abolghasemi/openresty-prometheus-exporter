@@ -1,12 +1,12 @@
 -- http_metrics.lua
--- Thin orchestration layer: wires this fork's pure lib/ modules --
+-- Thin orchestration layer: wires this project's pure lib/ modules --
 -- route_sanitizer, host_classifier, client_subnet, gauge_expiry,
 -- source_attribution, app_toggle -- into the upstream `prometheus`
 -- library's counter/gauge/histogram API, driven entirely by
 -- lib/metrics_config.lua. This file has no environment-specific values in
 -- it; edit metrics_config.lua instead.
 --
--- Wired up from default.conf as:
+-- Wired up from docker/conf.d/default.conf as:
 --   init_worker_by_lua_block { require("http_metrics").init() }
 --   access_by_lua_block      { require("http_metrics").classify_source() }
 --   log_by_lua_block         { require("http_metrics").record() }
@@ -48,36 +48,41 @@ local function own()
     return cfg.app, cfg.namespace
 end
 
+-- The request label set, in order. Schema and values are both built from this
+-- one list, so they can't drift apart (a mismatch either fails with
+-- "incorrect label count" or, worse, files values under the wrong names).
+local REQUEST_LABELS = {
+    "method", "route", "status", "client_subnet", "host",
+    "app", "namespace", "mode", "source_service", "source_namespace",
+}
+
+local function label_enabled(name)
+    return cfg["label_" .. name] == true
+end
+
 local function build_label_schema()
     local l = {}
-    if cfg.label_method            then table.insert(l, "method")           end
-    if cfg.label_route             then table.insert(l, "route")            end
-    if cfg.label_status            then table.insert(l, "status")           end
-    if cfg.label_client_subnet     then table.insert(l, "client_subnet")    end
-    if cfg.label_host              then table.insert(l, "host")             end
-    if cfg.label_app               then table.insert(l, "app")              end
-    if cfg.label_namespace         then table.insert(l, "namespace")        end
-    if cfg.label_mode              then table.insert(l, "mode")             end
-    if cfg.label_source_service    then table.insert(l, "source_service")   end
-    if cfg.label_source_namespace  then table.insert(l, "source_namespace") end
+    for _, name in ipairs(REQUEST_LABELS) do
+        if label_enabled(name) then table.insert(l, name) end
+    end
     return l
 end
 
-local function build_labels(method, route, status, subnet, host, mode, source_service, source_namespace)
+-- `v` maps label name -> value; app/namespace are filled in from own().
+local function build_labels(v)
+    if label_enabled("app") or label_enabled("namespace") then
+        v.app, v.namespace = own()
+    end
     local l = {}
-    if cfg.label_method            then table.insert(l, method)           end
-    if cfg.label_route             then table.insert(l, route)            end
-    if cfg.label_status            then table.insert(l, status)           end
-    if cfg.label_client_subnet     then table.insert(l, subnet)           end
-    if cfg.label_host              then table.insert(l, host)             end
-    if cfg.label_mode              then table.insert(l, mode)             end
-    if cfg.label_source_service    then table.insert(l, source_service)   end
-    if cfg.label_source_namespace  then table.insert(l, source_namespace) end
-    local app, namespace = own()
-    if cfg.label_app               then table.insert(l, app)              end
-    if cfg.label_namespace         then table.insert(l, namespace)        end
+    for _, name in ipairs(REQUEST_LABELS) do
+        if label_enabled(name) then table.insert(l, v[name] or "unknown") end
+    end
     return l
 end
+
+-- exposed for tests (tests/http_labels_test.lua)
+_M._build_label_schema = build_label_schema
+_M._build_labels       = build_labels
 
 -- ============================================================
 -- init_worker_by_lua_block
@@ -206,7 +211,7 @@ end
 -- ============================================================
 function _M.classify_source()
     if ngx.var.request_mode == "1" then
-        -- outbound (forward-proxy) leg: the caller is this pod itself
+        -- outbound leg: the caller is this pod itself
         ngx.ctx.source_service, ngx.ctx.source_namespace = own()
         return
     end
@@ -234,14 +239,14 @@ function _M.record()
     -- decision drives tunnel routing in default.conf, so the two never diverge.
     if require("intercept").should() then return end
 
-    -- forward-proxy master switch: skip recording entirely for outbound
-    -- (mode=1) traffic when disabled in metrics_config.apps.forward_proxy -- the proxy
-    -- itself keeps running either way, see lib/app_toggle.lua.
+    -- outbound master switch: skip recording entirely for outbound (mode=1)
+    -- traffic when disabled in metrics_config.apps.outbound -- the proxy itself
+    -- keeps running either way, see lib/app_toggle.lua.
     -- an unset $request_mode is "" (not nil) in servers that never `set` it
     local request_mode = ngx.var.request_mode
     if request_mode == nil or request_mode == "" then request_mode = "0" end
 
-    if request_mode == "1" and not app_toggle.enabled(apps, "forward_proxy") then
+    if request_mode == "1" and not app_toggle.enabled(apps, "outbound") then
         return
     end
 
@@ -250,16 +255,19 @@ function _M.record()
     local req_time = tonumber(ngx.var.request_time) or 0
     local req_size = tonumber(ngx.var.request_length) or 0
     local res_size = tonumber(ngx.var.body_bytes_sent) or 0
-    local subnet   = cfg.label_client_subnet and client_subnet.mask(ngx.var.http_x_forwarded_for or ngx.var.remote_addr) or nil
-    local host     = cfg.label_host and host_classifier.classify(ngx.var.host, cfg.cluster_ip_prefix) or nil
-    local mode     = cfg.label_mode and request_mode or nil
-    local route    = route_sanitizer.sanitize(ngx.var.request_uri, cfg.sanitize)
 
-    -- nil when nginx answered before the access phase ran (400, 413, `deny`)
-    local source_service   = ngx.ctx.source_service or "unknown"
-    local source_namespace = ngx.ctx.source_namespace or "unknown"
-
-    local labels = build_labels(method, route, status, subnet, host, mode, source_service, source_namespace)
+    -- source_* are nil when nginx answered before the access phase ran
+    -- (400, 413, `deny`); build_labels() turns them into "unknown"
+    local labels = build_labels{
+        method           = method,
+        route            = cfg.label_route and route_sanitizer.sanitize(ngx.var.request_uri, cfg.sanitize) or nil,
+        status           = status,
+        client_subnet    = cfg.label_client_subnet and client_subnet.mask(ngx.var.http_x_forwarded_for or ngx.var.remote_addr) or nil,
+        host             = cfg.label_host and host_classifier.classify(ngx.var.host, cfg.cluster_ip_prefix) or nil,
+        mode             = request_mode,
+        source_service   = ngx.ctx.source_service,
+        source_namespace = ngx.ctx.source_namespace,
+    }
 
     if metric_requests           then metric_requests:inc(1, labels)             end
     if metric_latency            then metric_latency:set(req_time, labels)       end
@@ -296,7 +304,7 @@ function _M.record()
     end
 end
 
--- exposed for the /metrics location on :80
+-- content_by_lua_block of `location = /metrics` on :9145
 function _M.collect()
     if metric_connections then
         local app, namespace = own()

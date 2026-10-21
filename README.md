@@ -22,27 +22,27 @@ set of OpenResty Lua modules, exposed on a Prometheus endpoint.
 A Prometheus `/metrics` endpoint with low-cardinality, well-labelled series —
 `method`, sanitized `route` (IDs/UUIDs/hashes collapsed to `$param` so you don't
 get a time series per order id), `status`, `host`, `mode` (`0` inbound / `1`
-outbound), and `source_service` / `source_namespace` — across inbound L7,
-outbound L7 (including decrypted HTTPS), and L4. The usual alternative is
+outbound), and `source_service` / `source_namespace` — across inbound,
+outbound (including decrypted HTTPS via https interception), and stream (L4). The usual alternative is
 shipping access logs somewhere and deriving metrics from them (more storage,
 more I/O, more delay, rarely cardinality-safe) or reaching for Istio/OpenTelemetry
 to get one slice of this. This gives you the whole picture from the proxy itself.
 
 Full catalog in the [metrics reference](docs/metrics-reference.md).
 
-## Enable what you need — one tier at a time
+## Features
 
-Each tier is independent and additive. Click through for the step-by-step guide.
+Turn on only what you need. Click through for the step-by-step guide.
 
-| | Capability | Turn on with | Guide |
+| Feature | What it gives you | Turn on with | Depends on |
 |---|---|---|---|
-| **1** | **Inbound L7** — request metrics into your app | run the image | [Mode 1](docs/mode-1-inbound-l7.md) |
-| **2** | **Outbound L7** — egress metrics (HTTPS as `CONNECT host:port`) | `HTTP(S)_PROXY=127.0.0.1:3128` | [Mode 2](docs/mode-2-outbound-l7.md) |
-| **3** | **Outbound HTTPS details** — real route/status inside HTTPS | `INTERCEPT_TLS=on` + a CA | [Mode 3](docs/mode-3-outbound-https-interception.md) |
-| **4** | **L4 stream** — TCP/UDP (Redis, DB…) from the app's side | a `stream.conf` block | [Mode 4](docs/mode-4-stream-l4.md) |
+| [**inbound**](docs/inbound.md) | Request metrics for traffic into your app | run the image | — |
+| [**outbound**](docs/outbound.md) | Egress metrics (HTTPS as `CONNECT host:port`) | `HTTP(S)_PROXY=127.0.0.1:3128` on the app | — |
+| [**https interception**](docs/https-interception.md) | Real route/status inside outbound HTTPS | `INTERCEPT_TLS=on` + a CA | outbound |
+| [**stream**](docs/stream.md) | TCP/UDP (Redis, DB…) from the app's side | a `stream.conf` | — |
 
 ```
-ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>
+ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>-<flavor>
 ```
 
 **Already run OpenResty, or nginx with `lua-nginx-module`?** You don't need the
@@ -52,31 +52,40 @@ nginx](docs/standalone-nginx.md).
 ## Quick start
 
 Run it as a sidecar beside your app (K8s) or in front of it (any OpenResty), set
-`APP_PORT` to your app's port, and scrape `:9145/metrics` (HTTP) and
-`:9254/metrics` (stream). A complete, mock-data Kubernetes example — ConfigMaps,
-a Deployment showing the app + nginx pair, and a Service/ServiceMonitor — is in
-[`examples/openresty-sidecar/`](examples/openresty-sidecar/). The
-[docs index](docs/README.md) walks each mode from there.
+`APP_PORT` to your app's port, and scrape `:9145/metrics` (plus `:9254/metrics`
+once stream is on). A complete Kubernetes example — the app + sidecar
+Deployment with inbound, outbound and stream on, a Service/ServiceMonitor, and
+a kustomization — is in [`examples/openresty-sidecar/`](examples/openresty-sidecar/).
+The [docs index](docs/README.md) walks each feature from there.
 
 ## Documentation
 
 - **[Documentation index](docs/README.md)** — all guides, start here
-- **Modes** — [1 Inbound](docs/mode-1-inbound-l7.md) · [2 Outbound](docs/mode-2-outbound-l7.md) · [3 HTTPS details](docs/mode-3-outbound-https-interception.md) · [4 Stream](docs/mode-4-stream-l4.md) · [own nginx](docs/standalone-nginx.md)
+- **Features** — [inbound](docs/inbound.md) · [outbound](docs/outbound.md) · [https interception](docs/https-interception.md) · [stream](docs/stream.md) · [own nginx](docs/standalone-nginx.md)
 - **[Metrics reference](docs/metrics-reference.md)** — every metric and label, with PromQL
 - **[Modules](docs/modules.md)** — maintainer's guide: what each `lib/` module does, why, how to change it
 - **[Architecture & internals](ARCHITECTURE.md)** — the design narrative
+- **[Changelog](CHANGELOG.md)**
 
 ## Images & versioning
 
-Images are built automatically on top of each
-[docker-openresty](https://github.com/openresty/docker-openresty) release,
-smoke-tested, and published to GHCR. **The image tag mirrors the OpenResty base**
-so you pick your OpenResty version directly:
+Every [docker-openresty](https://github.com/openresty/docker-openresty) release
+is rebuilt with this project baked in, **in every flavor upstream publishes**
+(alpine, alpine-slim, bookworm, noble, rocky, …) and on the same platforms,
+smoke-tested, and pushed to GHCR. **The tags are docker-openresty's own** — swap
+the image name and keep the tag:
 
-- `:<openresty-tag>` — latest exporter build for that base (e.g. `1.31.1.1-4`)
-- `:<openresty-tag>-<short-sha>` — immutable; pin this in production
-- `:<resty-version>` — newest revision of an OpenResty version
-- `:latest` — newest base + newest exporter
+| `openresty/openresty:` | `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:` | Meaning |
+|---|---|---|
+| `1.31.1.1-4-alpine` | `1.31.1.1-4-alpine` | that release, that flavor |
+| `1.31.1.1-alpine` | `1.31.1.1-alpine` | newest revision of OpenResty 1.31.1.1 |
+| `1.31-alpine` | `1.31-alpine` | newest release in the 1.31 series |
+| `alpine` | `alpine` | newest release |
+| `latest` | `latest` | newest release, `bookworm` flavor |
+
+A tag is rebuilt when this repo's code changes, so for an immutable reference
+pin the digest (`…@sha256:…`); the image's `org.opencontainers.image.revision`
+label names the commit it was built from.
 
 GitHub **Releases** (`vX.Y.Z`) are separate — they mark this project's own
 milestones, independent of the OpenResty version. The image tag answers "which
@@ -91,8 +100,8 @@ exposition-format serializer) are vendored **unmodified** from
 (MIT, © Anton Tolchanov), under
 [`vendor/nginx-lua-prometheus/`](vendor/nginx-lua-prometheus/). This project adds
 the observability layer — route sanitization, source attribution, the
-forward/stream proxies, and TLS interception — on top of that library's public
-API. Full credit for the library is upstream's.
+inbound/outbound/stream proxies, and https interception — on top of that
+library's public API. Full credit for the library is upstream's.
 
 ## License
 

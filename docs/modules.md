@@ -35,8 +35,8 @@ keep them true.
    The fix for a new high-cardinality pattern is to teach the sanitizer, never
    to drop the label.
 
-4. **Off is the default for anything invasive.** The forward proxy records but
-   doesn't alter traffic; interception is off until an env var + CA turn it on;
+4. **Off is the default for anything invasive.** outbound records but doesn't
+   alter traffic; https interception is off until an env var + CA turn it on;
    per-app metrics are opt-out but the *traffic* is never gated by the toggle.
 
 ---
@@ -166,7 +166,7 @@ cardinality bounded in the first place.
 
 ## `app_toggle.lua`
 
-**Why:** turn metrics off for one leg of traffic (the forward-proxy leg, or one
+**Why:** turn metrics off for one leg of traffic (the outbound leg, or one
 stream destination) without touching the traffic itself.
 
 **API:** `enabled(apps, key) → bool`. No entry, or an entry without
@@ -245,12 +245,12 @@ No site-specific values — it's driven entirely by `metrics_config.lua`.
   `ngx.ctx`.
 - `record()` — `log_by_lua_block`: read request vars, sanitize, build the label
   set, increment/observe.
-- `collect()` — `content_by_lua_block` on `/metrics`: expose.
+- `collect()` — `content_by_lua_block` on `:9145/metrics`: expose.
 
 **Invariants:** the label *schema* built in `init()` must match the label
-*values* built in `record()` exactly — order and count — or the `prometheus`
-library raises "incorrect label count". When you add a label, add it in **both**
-`build_label_schema()` and `build_labels()`, gated by the same `label_*` flag.
+*values* built in `record()` name-for-name. Both are built from one ordered
+list, `REQUEST_LABELS`, each entry switched by its `label_<name>` flag, so add
+or move labels there only — never build either side by hand.
 Requests nginx rejects before the access phase (400/405/413/`deny`) never ran
 `classify_source()`, so `record()` falls back to `source_service="unknown"` —
 keep that fallback when editing.
@@ -265,7 +265,9 @@ modules, so this is deliberately separate, not a reuse.
 
 **API:** `init()`, `connection_open()` (`preread_by_lua_block`, the `+1` for
 active connections), `record()` (`log_by_lua_block`, the `-1` and the rest),
-`collect()` (exposition).
+`collect()` (the `:9254` exposition server — a stream server speaks raw TCP, so
+it reads the scraper's HTTP request and writes the HTTP response itself), and
+`metric_data()` (the bare exposition text, no HTTP).
 
 **Invariants:** every destination `server{}` needs the `preread` hook or
 `nginx_stream_connections_active` under-counts. Keep `record()` **per
@@ -277,7 +279,7 @@ drives both the `destination` label and the `apps.stream.<name>` toggle.
 
 ## `intercept.lua`
 
-**Why:** the per-CONNECT decision for the forward proxy — intercept or tunnel
+**Why:** the per-CONNECT decision for https interception on the outbound proxy — intercept or tunnel
 straight through — kept out of nginx config so the only thing an app's
 `default.conf` carries is a one-line hook.
 
@@ -314,7 +316,7 @@ buys nothing here); mints and caches a leaf per SNI in `ssl_mint_cache` for
 `cert_ttl` seconds. Needs `lua-resty-openssl` (bundled in OpenResty) and
 `ngx.ssl`. **Invariant:** never log or expose the CA key; it's a trust anchor.
 If the CA can't be read, fail the handshake loudly — don't silently fall back to
-the baked `fallback.crt`, which exists only so `openresty -t` and no-SNI
+the baked `fallback.crt`, which exists only so `nginx -t` and no-SNI
 handshakes don't crash.
 
 ---
@@ -331,9 +333,10 @@ handshakes don't crash.
 
 ## Adding a label
 
-Add it in **three** places, all gated by one new `label_<name>` flag:
-`build_label_schema()`, `build_labels()`, and `metrics_config`. Mismatched
-schema vs values is the "incorrect label count" error. Weigh cardinality before
+Add a `label_<name>` flag to `metrics_config.http`, the name to
+`REQUEST_LABELS` in `http_metrics.lua`, and its value to the table `record()`
+passes to `build_labels`. Schema and values both come from `REQUEST_LABELS`, so
+they can't drift apart. Weigh cardinality before
 adding — a label with unbounded values is a Prometheus hazard; sanitize it first
 (see `route_sanitizer`/`host_classifier` for the pattern).
 
@@ -349,36 +352,25 @@ adding — a label with unbounded values is a Prometheus hazard; sanitize it fir
 
 ## Testing
 
-The pure modules are designed to be tested without nginx — they take values and
-return values. A minimal harness with `luaunit` (as upstream's
-`prometheus_test.lua` uses):
+The pure modules are tested without nginx — they take values and return
+values. [`tests/lib_test.lua`](../tests/lib_test.lua) is plain Lua with no
+framework; run it from the repo root, and CI's `Run Tests` does the same:
 
-```lua
-luarocks install luaunit
+```bash
+luajit tests/lib_test.lua      # or lua5.1
 ```
 
-```lua
-local lu = require("luaunit")
-local rs = require("route_sanitizer")
+Add a case there whenever you change a pure module (a positive and a negative
+one for sanitizer checks). It also checks that the HTTP label schema and values
+line up name-for-name with every label switched on.
 
-TestRoute = {}
-function TestRoute:test_collapses_numeric_id()
-  lu.assertEquals(rs.sanitize("/orders/8231"), "/orders/$param")
-end
-function TestRoute:test_keeps_real_route()
-  lu.assertEquals(rs.sanitize("/orders/new"), "/orders/new")
-end
-os.exit(lu.LuaUnit.run())
-```
-
-Run with `lua5.1 your_test.lua` (point `LUA_PATH` at `lib/`). The modules that
-touch nginx (`http_metrics`, `stream_metrics`, `tls_intercept`, `self_identity`)
-are best covered by the image's build-time **smoke test**
-(`.github/workflows/openresty-image.yml`), which runs a real request through a
-real container and asserts the expected series — see
-[maintaining the image](../ARCHITECTURE.md#prebuilt-image). When you change a
-pure module, add a `luaunit` case; when you change an orchestration module or the
-config wiring, make sure the smoke test still asserts the behaviour you changed.
+The modules that touch nginx (`http_metrics`, `stream_metrics`,
+`tls_intercept`, `self_identity`) are covered by the image's **smoke test**
+(`.github/workflows/openresty-image.yml`), which runs real requests through a
+real container of every flavor and asserts the expected series — see
+[the image](../ARCHITECTURE.md#the-image). When you change an orchestration
+module or the config wiring, make sure the smoke test still asserts the
+behaviour you changed.
 
 ---
 

@@ -1,12 +1,13 @@
-# Mode 4 — L4 (TCP/UDP) stream metrics
+# stream — L4 (TCP/UDP) metrics
 
 Observe the connections your app makes to a TCP/UDP dependency — Redis, a
 database, a message broker — from the app's own point of view: connection
 counts, bytes in/out, session duration, and how long upstream takes to connect
 and send its first byte.
 
-This is the `stream` (L4) counterpart to the HTTP modes. It's independent of
-Modes 1–3: a **separate** registry on a **separate** port (`:9254`), because
+This is the L4 counterpart to the HTTP features. It's independent of inbound,
+outbound and https interception: a **separate** registry on a **separate** port
+(`:9254`), because
 nginx cannot share a shared dict between the `http` and `stream` modules.
 
 Prerequisite: the image (or your own OpenResty with `ngx_stream_lua_module`,
@@ -28,8 +29,8 @@ app ──▶ 127.0.0.1:16379 (stream proxy) ──▶ redis.prod:6379
 One `server{}` block per destination, each tagged with
 `set $destination_name "redis"`, which feeds both the `destination` label and
 the per-destination on/off switch. Logic lives in
-[`stream_metrics`](modules.md#stream_metricslua); the wiring is in
-[`stream.conf`](../examples/openresty-sidecar/stream.conf).
+[`stream_metrics`](modules.md#stream_metricslua); the wiring is in the
+example's [`stream.conf`](../examples/openresty-sidecar/stream.conf).
 
 ---
 
@@ -40,13 +41,16 @@ the per-destination on/off switch. Logic lives in
 Stream is **off** in the image by default. Enable it by dropping a main-level
 include and your stream config in:
 
-- `/etc/nginx/main.d/stream.conf` containing:
+- `/etc/nginx/main.d/stream-enable.conf` containing:
   ```nginx
   stream { include /etc/nginx/stream.d/*.conf; }
   ```
 - `/etc/nginx/stream.d/stream.conf` — your destinations (next step).
 
-In Kubernetes, both come from ConfigMaps mounted at those paths.
+In Kubernetes, both come from one ConfigMap mounted at those paths — the
+[example](../examples/openresty-sidecar/) generates it from
+[`stream-enable.conf`](../examples/openresty-sidecar/stream-enable.conf) and
+[`stream.conf`](../examples/openresty-sidecar/stream.conf).
 
 ### 2. Define a destination
 
@@ -101,8 +105,8 @@ Stream metrics are on their **own** endpoint — add a second scrape target:
 ```
 
 With the Operator, the example
-[`ServiceMonitor`](../examples/openresty-sidecar/k8s/service-and-servicemonitor.yaml)
-already defines both the `app` (`:9145`) and `stream-metrics` (`:9254`)
+[`ServiceMonitor`](../examples/openresty-sidecar/service.yaml)
+already defines both the `metrics` (`:9145`) and `stream-metrics` (`:9254`)
 endpoints.
 
 ### 5. Verify
@@ -116,7 +120,9 @@ curl -s localhost:9254/metrics | grep nginx_stream_connections_total
 ## What you get
 
 `nginx_stream_*` series labelled with `destination`, `upstream_addr`, `status`,
-and (on K8s) `source_service`/`source_namespace`. Full list and types in the
+and optionally `source_service`/`source_namespace` (off by default: set
+`stream.label_source_service` / `label_source_namespace` in `metrics_config.lua`
+and declare `lua_shared_dict stream_ptr_cache 1M;` in `stream.conf`). Full list and types in the
 [metrics reference](metrics-reference.md#stream-l4-metrics). Highlights:
 
 - `nginx_stream_connections_total` / `_active` — how many, how many now
@@ -154,6 +160,8 @@ default. See [`app_toggle`](modules.md#app_togglelua).
 | `nginx_stream_connections_active` always 0 | Missing `preread_by_lua_block { ... connection_open() }` in the destination's `server{}` |
 | A phantom `destination` with no real traffic | A `log_by_lua_block` placed at the top of the stream file instead of per-`server{}` — the exposition server triggers it. Keep `record()` per destination block |
 | `source_service="unknown"` | Same as HTTP: needs K8s pod PTR; expected on plain Docker |
+| No `source_*` labels | Off by default; needs the two `label_source_*` flags **and** `lua_shared_dict stream_ptr_cache` (the error log says which is missing) |
+| Prometheus: `malformed HTTP response` on `:9254` | The exposition server must call `require("stream_metrics").collect()`, which speaks HTTP; printing `metric_data()` directly doesn't |
 | Metrics on `:9145` instead of `:9254` | You reused the HTTP registry — stream must have its own `lua_shared_dict` and its own exposition server; they can't share |
 
 Back to the [docs index](README.md) · deep dive: [Modules](modules.md).

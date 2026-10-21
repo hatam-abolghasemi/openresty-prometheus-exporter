@@ -5,15 +5,17 @@ are produced by the Lua modules in [`lib/`](../lib/) plus a handful of config
 lines — you can drop them into an **existing OpenResty**, or into **stock nginx
 compiled with `lua-nginx-module`**, and get the same `/metrics`.
 
-This is a deployment shape, not a fifth mode. Once wired, Modes
-[1](mode-1-inbound-l7.md)–[4](mode-4-stream-l4.md) work exactly as documented.
+This is a deployment shape, not a feature. Once wired,
+[inbound](inbound.md), [outbound](outbound.md),
+[https interception](https-interception.md) and [stream](stream.md) work
+exactly as documented.
 
 ---
 
 ## Requirement: nginx **with** the Lua module
 
 This project is OpenResty code. It will **not** run on stock nginx as shipped —
-it needs `ngx_http_lua_module` (and, for [Mode 4](mode-4-stream-l4.md),
+it needs `ngx_http_lua_module` (and, for [stream](stream.md),
 `ngx_stream_lua_module`). You have two ways to satisfy that:
 
 1. **OpenResty** — nginx with the Lua modules, LuaJIT, and the `lua-resty-*`
@@ -21,18 +23,18 @@ it needs `ngx_http_lua_module` (and, for [Mode 4](mode-4-stream-l4.md),
    combination that's smoke-tested. Recommended.
 2. **Stock nginx + the module** — build nginx with
    [`lua-nginx-module`](https://github.com/openresty/lua-nginx-module) (and
-   `lua-resty-core`, `lua-resty-lrucache`, and for Mode 3
+   `lua-resty-core`, `lua-resty-lrucache`, and for https interception
    `lua-resty-openssl`), or install a distro package that bundles it (e.g.
    Debian's `libnginx-mod-http-lua`). You are then responsible for matching
    module and core versions. Several capabilities also need specific pieces:
 
    | Capability | Needs |
    |---|---|
-   | Modes 1–2 (HTTP metrics, forward proxy) | `ngx_http_lua_module` |
-   | Forward-proxy CONNECT ([Mode 2](mode-2-outbound-l7.md)) | nginx ≥ 1.31 native `ngx_http_tunnel_module` (`tunnel_pass`) |
-   | HTTPS interception ([Mode 3](mode-3-outbound-https-interception.md)) | `lua-resty-openssl`, `ngx.ssl` |
+   | [inbound](inbound.md), [outbound](outbound.md) | `ngx_http_lua_module` |
+   | outbound CONNECT | nginx ≥ 1.31 native `ngx_http_tunnel_module` (`tunnel_pass`) |
+   | [https interception](https-interception.md) | `lua-resty-openssl`, `ngx.ssl` |
    | Caller identity PTR ([source attribution](modules.md#source_attributionlua)) | `lua-resty-dns` (`resty.dns.resolver`) |
-   | Stream metrics ([Mode 4](mode-4-stream-l4.md)) | `ngx_stream_lua_module` |
+   | [stream](stream.md) | `ngx_stream_lua_module` |
 
 > If any of that sounds like more than you want to own, use the image — it's the
 > whole point of publishing it, and it tracks OpenResty releases for you.
@@ -107,12 +109,14 @@ Everything works, but you own the plumbing the image otherwise handles:
 - **Interception machinery** — the image bakes in `conf.d/intercept.conf` (the
   `:3129` terminator + `ssl_mint_cache`), `main.d/intercept-env.conf` (the
   `env INTERCEPT_TLS …` declarations so workers can read them), and a
-  `fallback.crt`/`fallback.key`. For Mode 3 off-image you must reproduce those
+  `fallback.crt`/`fallback.key`. For https interception off-image you must reproduce those
   yourself.
 - **Env-var switches** — `INTERCEPT_TLS` et al. only reach Lua if declared with
   `env` at the main level (that's what `main.d/intercept-env.conf` does).
-- **System trust store** — Mode 3 re-origination verifies against
-  `/etc/ssl/certs/ca-certificates.crt`; make sure your base has `ca-certificates`.
+- **System trust store** — https interception re-originates with verification
+  against `/etc/nginx/intercept/trusted-ca.crt`, which the image links to the
+  distro's CA bundle; off-image, point `proxy_ssl_trusted_certificate` in
+  `intercept.conf` at your bundle.
 - **The update pipeline** — the image rebuilds on every OpenResty release and
   smoke-tests itself; off-image you track versions by hand.
 

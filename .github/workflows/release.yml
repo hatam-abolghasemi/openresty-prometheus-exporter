@@ -1,9 +1,9 @@
 name: Release
 
-# Project releases are decoupled from image tags. Image tags track the
-# OpenResty base (<openresty-tag>, <openresty-tag>-<sha>, latest); a GitHub
-# Release marks a milestone of THIS project's capabilities. Cut one by pushing
-# a SemVer tag:  git tag v0.1.0 && git push origin v0.1.0
+# Project releases are decoupled from image tags. Image tags mirror
+# docker-openresty's (<openresty-tag>-<flavor> and friends); a GitHub Release
+# marks a milestone of THIS project's capabilities. Cut one by pushing a SemVer
+# tag:  git tag v0.1.0 && git push origin v0.1.0
 on:
   push:
     tags: ["v*"]
@@ -27,10 +27,11 @@ jobs:
             --title "$TAG" \
             --generate-notes \
             --notes-file - <<'NOTE'
-          Images for every OpenResty base are published continuously by the
-          "OpenResty image" workflow — pull by the OpenResty version you target:
+          Images for every docker-openresty release and flavor are published
+          continuously by the "OpenResty image" workflow, under the same tags
+          as openresty/openresty:
 
-              ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>
+              ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-tag>-<flavor>
 
-          Pin `:<openresty-tag>-<short-sha>` in production for an immutable build.
+          Pin by digest (`@sha256:...`) in production for an immutable build.
           NOTE

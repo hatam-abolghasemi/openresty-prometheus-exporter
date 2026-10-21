@@ -1,0 +1,36 @@
+# Clients use port 80 (inbound goes through the sidecar). Prometheus scrapes
+# :9145 (HTTP metrics: inbound, outbound, https interception) and :9254
+# (stream). The ServiceMonitor needs the Prometheus Operator CRDs; its
+# `release` label is a placeholder for whatever your Prometheus selects on.
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+spec:
+  selector:
+    app.kubernetes.io/name: example-app
+  ports:
+  - { name: http,           port: 80,   targetPort: http }
+  - { name: metrics,        port: 9145, targetPort: metrics }
+  - { name: stream-metrics, port: 9254, targetPort: stream-metrics }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+    release: prometheus-example
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-app
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+  - port: stream-metrics
+    path: /metrics
+    interval: 15s

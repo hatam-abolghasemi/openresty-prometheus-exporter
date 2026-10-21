@@ -1,6 +1,6 @@
 -- app_toggle.lua
 -- Per-app / per-destination metrics enable switch, so one leg of traffic
--- (e.g. the forward-proxy leg, or a single stream destination) can have its
+-- (e.g. the outbound leg, or a single stream destination) can have its
 -- metrics turned off while the traffic itself keeps flowing unaffected.
 --
 -- An app with no explicit `metrics_enabled` entry -- or no entry at all --
@@ -14,9 +14,9 @@
 -- Usage:
 --   local app_toggle = require("app_toggle")
 --   local apps = {
---     forward_proxy = { metrics_enabled = false },
+--     outbound = { metrics_enabled = false },
 --   }
---   app_toggle.enabled(apps, "forward_proxy")   --> false
+--   app_toggle.enabled(apps, "outbound")        --> false
 --   app_toggle.enabled(apps, "some_other_leg")  --> true (no entry = enabled)
 
 local _M = {}

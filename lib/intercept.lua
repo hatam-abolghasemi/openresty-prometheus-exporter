@@ -1,5 +1,6 @@
 -- intercept.lua
--- Decides, per CONNECT, whether the forward proxy should TLS-intercept it
+-- HTTPS interception switch: decides, per CONNECT on the outbound proxy
+-- (:3128), whether to TLS-intercept it
 -- (hand it to the :3129 terminator) or tunnel it straight through. All the
 -- machinery -- this module, the :3129 server, the shared dict -- is baked into
 -- the image; a deployment turns interception on with one env var and a mounted

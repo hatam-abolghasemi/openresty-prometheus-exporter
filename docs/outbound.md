@@ -1,16 +1,18 @@
-# Mode 2 — Outbound L7 (egress metrics)
+# outbound — egress metrics
 
 Metrics for calls your app makes **out** to other services and the internet.
-Same pipeline and same `/metrics` as [Mode 1](mode-1-inbound-l7.md), tagged
+Same pipeline and same `/metrics` as [inbound](inbound.md), tagged
 `mode="1"`.
 
 - **Plain HTTP** egress → full method, route, status, timing.
 - **HTTPS** egress → recorded as `CONNECT host:port` (the TLS stays end-to-end;
   you see *which host* and *when*, not the route/status inside). That's the safe
   default and enough for many apps. To see inside HTTPS, add
-  [Mode 3](mode-3-outbound-https-interception.md).
+  [https interception](https-interception.md), which builds on this feature.
 
-Prerequisite: [Mode 1](mode-1-inbound-l7.md) (you're already running the image).
+Prerequisite: the image is running. The `:3128` server is always there; the
+app opts in by sending its egress through it. Independent of
+[inbound](inbound.md).
 
 ---
 
@@ -109,10 +111,10 @@ nginx_http_requests_total{method="GET",route="/",status="301",host="example.com"
 nginx_http_requests_total{method="CONNECT",route="example.com:443",status="200",host="example.com",mode="1",...} 1
 ```
 
-That `method="CONNECT"` line is the expected HTTPS shape in Mode 2. The `200` is
-"tunnel opened", not the real HTTP status inside. To turn that into
+That `method="CONNECT"` line is the expected HTTPS shape for outbound. The
+`200` is "tunnel opened", not the real HTTP status inside. To turn that into
 `method="GET" route="/" status="301"`, enable
-[Mode 3](mode-3-outbound-https-interception.md).
+[https interception](https-interception.md).
 
 ---
 
@@ -135,8 +137,8 @@ server {
 }
 ```
 
-The `$connect_upstream` indirection is the *only* hook interception needs — with
-Mode 3 off, [`intercept.upstream()`](modules.md#interceptlua) returns the real
+The `$connect_upstream` indirection is the *only* hook https interception
+needs — with it off, [`intercept.upstream()`](modules.md#interceptlua) returns the real
 `host:port`, so this behaves exactly like a bare `tunnel_pass;`.
 
 ---
@@ -147,7 +149,7 @@ The forward proxy keeps proxying even if you don't want its metrics. Set, in
 [`metrics_config.lua`](modules.md#metrics_configlua):
 
 ```lua
-apps = { forward_proxy = { metrics_enabled = false } }
+apps = { outbound = { metrics_enabled = false } }
 ```
 
 Traffic still flows; only recording for the `mode="1"` leg stops. See
@@ -160,9 +162,9 @@ Traffic still flows; only recording for the `mode="1"` leg stops. See
 | Symptom | Likely cause |
 |---|---|
 | No `mode="1"` series at all | App isn't using the proxy — env vars not set, not inherited (PHP-FPM `clear_env`), or client ignores them (Node core, Java) |
-| `CONNECT tunnel failed, response 500` | Usually a sidecar config/Lua error, not the tunnel — check `kubectl logs <pod> -c nginx`; see [Mode 3 troubleshooting](mode-3-outbound-https-interception.md#troubleshooting) |
+| `CONNECT tunnel failed, response 500` | Usually a sidecar config/Lua error, not the tunnel — check `kubectl logs <pod> -c nginx`; see [https interception troubleshooting](https-interception.md#troubleshooting) |
 | `504` on an external host | Egress to that host is blocked/slow from your network, not a proxy bug (other hosts return normally) |
 | In-cluster calls unexpectedly proxied | No `NO_PROXY` set — add `127.0.0.1,localhost` and any in-cluster suffixes you don't want tunnelled |
-| Want HTTPS route/status | That's [Mode 3](mode-3-outbound-https-interception.md), not Mode 2 |
+| Want HTTPS route/status | That's [https interception](https-interception.md), on top of outbound |
 
-Next: [Mode 3 — Outbound HTTPS details](mode-3-outbound-https-interception.md).
+Next: [https interception](https-interception.md).

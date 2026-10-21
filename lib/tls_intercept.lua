@@ -1,19 +1,19 @@
 -- tls_intercept.lua
--- Per-SNI leaf-certificate minting for the forward-proxy's HTTPS interception
--- leg (the 127.0.0.1:3129 server in default.conf). On each TLS handshake it
+-- Per-SNI leaf-certificate minting for HTTPS interception (the
+-- 127.0.0.1:3129 server in docker/conf.d/intercept.conf). On each TLS handshake it
 -- mints -- and caches -- a short-lived leaf certificate for the requested SNI,
 -- signed by a CA that is mounted into THIS container only (never the app's).
 -- That lets the :3129 server terminate the app's outbound TLS, read the real
 -- method/route/status for metrics, and re-originate a verified TLS connection
 -- to the true destination.
 --
--- Wired from default.conf as:
+-- Wired from intercept.conf as:
 --   ssl_certificate_by_lua_block { require("tls_intercept").mint() }
 --
 -- Requires lua-resty-openssl (bundled in OpenResty) and ngx.ssl. Nothing here
 -- runs unless a request actually reaches :3129, i.e. unless interception is
--- switched on by mounting an /etc/nginx/intercept/ports/*.map entry -- so the
--- default image never loads a CA and behaves exactly as a plain proxy.
+-- switched on (INTERCEPT_TLS=on, see lib/intercept.lua) -- so the default
+-- image never loads a CA and behaves exactly as a plain proxy.
 --
 -- The CA is a trust anchor: whoever holds its key can impersonate any host to
 -- every pod that trusts it. Use a dedicated CA (ideally one per namespace),

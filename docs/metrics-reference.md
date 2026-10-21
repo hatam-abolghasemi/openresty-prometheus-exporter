@@ -5,8 +5,9 @@ metrics and labels are active is controlled by the `metric_*` / `label_*` flags
 in [`metrics_config.lua`](modules.md#metrics_configlua) — the lists below are the
 full set at default config.
 
-- **HTTP** metrics are on `:9145/metrics` ([Modes 1–3](mode-1-inbound-l7.md)).
-- **Stream** metrics are on `:9254/metrics` ([Mode 4](mode-4-stream-l4.md)).
+- **HTTP** metrics are on `:9145/metrics` ([inbound](inbound.md),
+  [outbound](outbound.md), [https interception](https-interception.md)).
+- **Stream** metrics are on `:9254/metrics` ([stream](stream.md)).
 
 ---
 
@@ -27,10 +28,10 @@ individually toggleable):
 | `client_subnet` | `10.233.4.0` | [masked client IP](modules.md#client_subnetlua) | **off** |
 | `app` / `namespace` | the sidecar's own identity | [self identity](modules.md#self_identitylua) | off |
 
-> For an **intercepted** HTTPS call ([Mode 3](mode-3-outbound-https-interception.md))
+> For an **intercepted** HTTPS call ([https interception](https-interception.md))
 > these are the *real* decrypted values. Without interception, an HTTPS egress
 > call shows `method="CONNECT"`, `route="host:port"`, `status="200"` (tunnel
-> established) — see [Mode 2](mode-2-outbound-l7.md).
+> established) — see [outbound](outbound.md).
 
 ## HTTP request/response metrics
 
@@ -69,21 +70,24 @@ status don't apply.
 ## Stream (L4) metrics
 
 On `:9254/metrics`. Labels: `destination` (your `$destination_name`),
-`upstream_addr`, `status`, and (on K8s) `source_service` / `source_namespace`.
+`upstream_addr`, `status`, and — when `stream.label_source_service` /
+`label_source_namespace` are on and `stream.conf` declares
+`lua_shared_dict stream_ptr_cache` — `source_service` / `source_namespace`
+(off by default).
 
 | Metric | Type | Notes |
 |---|---|---|
 | `nginx_stream_connections_total` | counter | Connections to this destination |
-| `nginx_stream_connections_active` | gauge | Currently open (needs the `preread` hook — see [Mode 4](mode-4-stream-l4.md)) |
-| `nginx_stream_bytes_sent_total` | counter | Bytes app→upstream |
-| `nginx_stream_bytes_received_total` | counter | Bytes upstream→app |
+| `nginx_stream_connections_active` | gauge | Currently open (needs the `preread` hook — see [stream](stream.md)) |
+| `nginx_stream_bytes_sent_total` | counter | Bytes sent to the client (the app) |
+| `nginx_stream_bytes_received_total` | counter | Bytes received from the client (the app) |
 | `nginx_stream_upstream_bytes_sent_total` | counter | Bytes to the upstream leg |
 | `nginx_stream_upstream_bytes_received_total` | counter | Bytes from the upstream leg |
 | `nginx_stream_session_duration_seconds` | gauge | Last session length |
 | `nginx_stream_session_duration_seconds_histogram` | histogram | Session length distribution |
 | `nginx_stream_upstream_connect_time_seconds` | gauge | How fast the dependency accepts the connection |
 | `nginx_stream_upstream_connect_time_seconds_histogram` | histogram | …distribution |
-| `nginx_stream_upstream_first_byte_time_seconds` | gauge | Time to first byte from the dependency |
+| `nginx_stream_upstream_first_byte_time_seconds` | histogram | Time to first byte from the dependency; buckets = `histogram_buckets_connect_time` |
 
 The two "how fast does my dependency answer" gauges
 (`upstream_connect_time`, `session_duration`) are expired by `gauge_expiry` so a
@@ -133,10 +137,10 @@ histogram_quantile(0.95,
 sum by (source_service, source_namespace) (
   rate(nginx_http_requests_total{mode="0"}[5m]))
 
-# outbound calls by destination host (incl. decrypted HTTPS in Mode 3)
+# outbound calls by destination host (incl. decrypted HTTPS from https interception)
 sum by (host, status) (rate(nginx_http_requests_total{mode="1"}[5m]))
 
-# how fast is my Redis answering (Mode 4)
+# how fast is my Redis answering (stream)
 histogram_quantile(0.99,
   sum by (le, destination) (rate(nginx_stream_upstream_connect_time_seconds_histogram_bucket[5m])))
 

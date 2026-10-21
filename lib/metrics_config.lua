@@ -1,5 +1,5 @@
 -- metrics_config.lua
--- All environment-specific values for this fork's HTTP and stream metrics
+-- All environment-specific values for this project's HTTP and stream metrics
 -- (app/namespace names, which metrics and labels are enabled, histogram
 -- buckets, source-attribution ranges, per-app toggles) in one place.
 --
@@ -7,7 +7,7 @@
 -- every other lib/*.lua module is generic code with no environment-specific
 -- values in it. Being plain data (a table, no logic), it's also a natural
 -- fit for shipping via its own ConfigMap if you want config changes to not
--- require rebuilding the nginx image -- see examples/openresty-sidecar/k8s/.
+-- require rebuilding the nginx image -- see examples/openresty-sidecar/.
 --
 -- Consumed by lib/http_metrics.lua (the `http` and `apps` tables) and
 -- lib/stream_metrics.lua (the `stream` and `apps.stream` tables).
@@ -54,7 +54,7 @@ return {
     -- proxy/traffic itself keeps running regardless of this switch; it only
     -- stops metrics being recorded for that leg.
     apps = {
-        forward_proxy = { metrics_enabled = true },  -- checked by http_metrics.lua
+        outbound = { metrics_enabled = true },        -- checked by http_metrics.lua
         stream = {                                    -- checked by stream_metrics.lua, keyed by destination_name
             redis = { metrics_enabled = true },
         },
@@ -100,7 +100,7 @@ return {
         label_namespace        = false,
         label_client_subnet    = false,  -- remote_addr as x.x.x.0/24; source_service/namespace below is usually the more useful label
         label_host             = true,
-        label_mode             = true,   -- 0 = reverse-proxy/incoming, 1 = forward-proxy/outgoing
+        label_mode             = true,   -- "0" = inbound, "1" = outbound (incl. https interception)
         label_source_service   = true,
         label_source_namespace = true,
 
@@ -136,10 +136,10 @@ return {
         waypoint_service_name    = "waypoint",  -- must match the Service name your mesh's waypoint Gateway creates
     },
 
-    -- HTTPS interception for the forward-proxy leg (lib/tls_intercept.lua +
-    -- the :3129 server in default.conf). Only consulted when interception is
-    -- switched on by mounting an /etc/nginx/intercept/ports/*.map entry; the
-    -- CA below must be mounted into the nginx container ONLY (never the app).
+    -- HTTPS interception (lib/tls_intercept.lua + the :3129 server in
+    -- docker/conf.d/intercept.conf). Only consulted once interception is
+    -- switched on with INTERCEPT_TLS=on (lib/intercept.lua); the CA below must
+    -- be mounted into the nginx container ONLY (never the app).
     intercept = {
         ca_cert_path = "/etc/nginx/intercept/ca.crt",
         ca_key_path  = "/etc/nginx/intercept/ca.key",
@@ -166,6 +166,10 @@ return {
         label_destination    = true,
         label_upstream_addr  = true,
         label_status         = true,
+        -- who opened the connection; also needs `lua_shared_dict stream_ptr_cache`
+        -- in stream.conf (lib/stream_metrics.lua)
+        label_source_service   = false,
+        label_source_namespace = false,
 
         histogram_buckets_session_duration = {0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 15, 30, 60},
         histogram_buckets_connect_time     = {0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},

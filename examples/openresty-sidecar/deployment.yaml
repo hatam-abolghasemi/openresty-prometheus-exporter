@@ -1,0 +1,80 @@
+# An app plus the exporter as a sidecar in one pod. Everything named
+# "example" is a placeholder.
+#
+# Features on here:
+#   inbound   clients reach the pod on :80, the sidecar forwards to the app
+#   outbound  the app's HTTP(S)_PROXY points at the sidecar's 127.0.0.1:3128
+#   stream    the app reaches Redis through the sidecar's 127.0.0.1:16379
+# https interception is off; see docs/https-interception.md to add it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: example-app
+    spec:
+      containers:
+      - name: app
+        image: registry.example.com/example/app:v1.0.0
+        ports:
+        - name: app
+          containerPort: 8080
+        env:
+        # outbound
+        - { name: HTTP_PROXY,  value: "http://127.0.0.1:3128" }
+        - { name: HTTPS_PROXY, value: "http://127.0.0.1:3128" }
+        - { name: NO_PROXY,    value: "127.0.0.1,localhost" }
+        - { name: http_proxy,  value: "http://127.0.0.1:3128" }
+        - { name: https_proxy, value: "http://127.0.0.1:3128" }
+        - { name: no_proxy,    value: "127.0.0.1,localhost" }
+        # stream: the app talks to the sidecar's listener, not Redis directly
+        - { name: REDIS_ADDR,  value: "127.0.0.1:16379" }
+
+      - name: nginx
+        # pick any docker-openresty release + flavor, e.g. 1.31.1.1-4-alpine
+        image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4-alpine
+        env:
+        - { name: APP_PORT, value: "8080" }
+        ports:
+        - { name: http,           containerPort: 80 }
+        - { name: metrics,        containerPort: 9145 }
+        - { name: stream-metrics, containerPort: 9254 }
+        readinessProbe:
+          httpGet: { path: /healthz, port: metrics }
+          periodSeconds: 5
+        livenessProbe:
+          httpGet: { path: /healthz, port: metrics }
+          periodSeconds: 15
+        resources:
+          requests: { cpu: 10m, memory: 16Mi }
+          limits:   { cpu: 500m, memory: 128Mi }
+        volumeMounts:
+        - name: stream
+          mountPath: /etc/nginx/main.d/stream-enable.conf
+          subPath: stream-enable.conf
+          readOnly: true
+        - name: stream
+          mountPath: /etc/nginx/stream.d/stream.conf
+          subPath: stream.conf
+          readOnly: true
+        # - name: metrics-config
+        #   mountPath: /opt/prometheus/lib/metrics_config.lua
+        #   subPath: metrics_config.lua
+        #   readOnly: true
+
+      volumes:
+      - name: stream
+        configMap:
+          name: sidecar-stream
+      # - name: metrics-config
+      #   configMap:
+      #     name: sidecar-metrics-config

@@ -1,11 +1,12 @@
-# Mode 1 — Inbound L7 (request metrics)
+# inbound — request metrics into your app
 
 Metrics for traffic **coming into** your app: request count, duration, request
 and response size, and connection stats — each labelled with `method`, a
 cardinality-safe `route`, `status`, `host`, and (on Kubernetes) which service
 called you.
 
-This is the baseline mode. Everything else builds on it.
+On as soon as the image runs. No other feature depends on it, and it
+depends on none.
 
 ---
 
@@ -40,7 +41,7 @@ records every request. Point it at your app's port with `APP_PORT`.
 
 ```yaml
 - name: nginx
-  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4  # pick your OpenResty tag
+  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4-alpine  # any docker-openresty tag
   env:
     - name: APP_PORT
       value: "8080"          # the port your app listens on
@@ -51,7 +52,7 @@ records every request. Point it at your app's port with `APP_PORT`.
 
 Then send client traffic to the nginx container's `:80` instead of straight to
 the app. A full runnable example (Deployment + Service + ServiceMonitor) is in
-[`examples/openresty-sidecar/k8s/`](../examples/openresty-sidecar/k8s/).
+[`examples/openresty-sidecar/`](../examples/openresty-sidecar/).
 
 **Plain Docker** — share one network namespace so `127.0.0.1:$APP_PORT` reaches
 the app:
@@ -60,7 +61,7 @@ the app:
 docker run -d --name app -p 8080:8080 your-app:latest
 docker run -d --name nginx --network container:app \
   -e APP_PORT=8080 \
-  ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:latest
+  ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:alpine
 ```
 
 > Under plain Docker everything here works **except** `source_service` /
@@ -70,8 +71,8 @@ docker run -d --name nginx --network container:app \
 ### 2. Scrape it
 
 Point Prometheus at `:9145`, path `/metrics`. With the Prometheus Operator, the
-example [`ServiceMonitor`](../examples/openresty-sidecar/k8s/service-and-servicemonitor.yaml)
-already wires the `app` (HTTP) port. Manually:
+example [`ServiceMonitor`](../examples/openresty-sidecar/service.yaml)
+already wires the `metrics` port. Manually:
 
 ```yaml
 scrape_configs:
@@ -170,4 +171,4 @@ your own copy over the baked one to change it without rebuilding. Common knobs:
 | `host` label noisy | `cluster_ip_prefix` wrong, so internal IPs fall into the generic `$ip` bucket — set it to your pod/service CIDR prefix |
 | 400/404 recorded as `source_service="unknown"` | Expected: nginx rejected the request before the access phase ran |
 
-Next: [Mode 2 — Outbound L7](mode-2-outbound-l7.md).
+Next: [outbound](outbound.md).

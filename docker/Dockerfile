@@ -1,11 +1,18 @@
+# One Dockerfile for every docker-openresty flavor. OPENRESTY_TAG is the full
+# upstream tag, flavor included, e.g. 1.31.1.1-4-alpine or 1.31.1.1-4-bookworm.
+ARG BASE_IMAGE=openresty/openresty
 ARG OPENRESTY_TAG
-FROM openresty/openresty:${OPENRESTY_TAG}-alpine
 
-# openssl: generate the baked fallback cert the :3129 ssl server needs to start
-# and pass `openresty -t`. ca-certificates: the system trust bundle the
-# interception leg verifies real upstreams against (proxy_ssl_trusted_certificate).
-RUN apk add --no-cache openssl ca-certificates \
- && update-ca-certificates
+# The :3129 interception server needs a certificate on disk to start and to
+# pass `nginx -t`; real handshakes get a minted one (lib/tls_intercept.lua).
+# Generated once on the build host, so no flavor needs an openssl binary.
+FROM --platform=$BUILDPLATFORM alpine AS fallback-cert
+RUN apk add --no-cache openssl \
+ && openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+        -keyout /fallback.key -out /fallback.crt \
+        -subj "/CN=openresty-intercept-fallback"
+
+FROM ${BASE_IMAGE}:${OPENRESTY_TAG}
 
 COPY vendor/nginx-lua-prometheus/prometheus.lua \
      vendor/nginx-lua-prometheus/prometheus_keys.lua \
@@ -15,15 +22,10 @@ COPY lib/ /opt/prometheus/lib/
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/main.d/ /etc/nginx/main.d/
 COPY docker/conf.d/ /etc/nginx/conf.d/
+COPY --from=fallback-cert /fallback.crt /fallback.key /etc/nginx/intercept/
+COPY docker/setup.sh /tmp/setup.sh
 
-RUN ln -sf /etc/nginx/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf \
- && mkdir -p /etc/nginx/main.d /etc/nginx/stream.d \
-            /etc/nginx/intercept/ports /etc/nginx/intercept/bypass \
- && chmod -R a+rX /opt/prometheus \
- && openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-        -keyout /etc/nginx/intercept/fallback.key \
-        -out    /etc/nginx/intercept/fallback.crt \
-        -subj   "/CN=openresty-intercept-fallback"
+RUN sh /tmp/setup.sh && rm /tmp/setup.sh
 
 ENV APP_PORT=8080
 

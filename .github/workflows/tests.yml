@@ -2,55 +2,58 @@ name: Run Tests
 on:
   push:
     paths:
+      - lib/**
+      - tests/**
       - vendor/**
       - .github/workflows/tests.yml
   pull_request:
     paths:
+      - lib/**
+      - tests/**
       - vendor/**
       - .github/workflows/tests.yml
-  schedule:
-    - cron: '23 06 * * 5'
   workflow_dispatch:
+
 jobs:
-  lua:
+  lib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get install -y --no-install-recommends luajit
+      - run: luajit tests/lib_test.lua
+
+  # upstream's own suite, run against the vendored copy to prove it is intact
+  vendor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      matrix:
-        lua: ["5.1", "5.2"]
+    defaults:
+      run:
+        working-directory: vendor/nginx-lua-prometheus
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-      - run: sudo apt install libpcre2-dev libreadline-dev
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: sudo apt-get install -y libpcre2-dev libreadline-dev
       - run: pip install hererocks
-      - run: hererocks here -r^ --lua ${{ matrix.lua }}
-      - run: echo $PWD/here/bin >> $GITHUB_PATH
-      - run: eval `luarocks path --bin`
-      - run: luarocks install luacheck
-      - run: luarocks install luacov-coveralls
-      - run: luarocks install luaunit
-      - run: luarocks install lrexlib-pcre2
+      - run: hererocks "$RUNNER_TEMP/lua" -r^ --lua 5.1
+      - run: echo "$RUNNER_TEMP/lua/bin" >> "$GITHUB_PATH"
+      - run: luarocks install luacheck && luarocks install luaunit && luarocks install lrexlib-pcre2
       - run: luacheck --globals ngx -- prometheus.lua prometheus_keys.lua prometheus_resty_counter.lua
-        working-directory: vendor/nginx-lua-prometheus
       - run: luacheck --globals luaunit rex_pcre2 ngx TestPrometheus TestKeyIndex -- prometheus_test.lua
-        working-directory: vendor/nginx-lua-prometheus
-      - run: lua -lluacov prometheus_test.lua
-        working-directory: vendor/nginx-lua-prometheus
-      - run: luacov-coveralls --include ^prometheus
-        working-directory: vendor/nginx-lua-prometheus
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        if: ${{ matrix.lua == '5.1' }}
-  integration:
+      - run: lua prometheus_test.lua
+
+  vendor-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
         working-directory: vendor/nginx-lua-prometheus/integration
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.22
+          go-version-file: vendor/nginx-lua-prometheus/integration/go.mod
       - run: go get
       - run: chmod +x test.sh && ./test.sh

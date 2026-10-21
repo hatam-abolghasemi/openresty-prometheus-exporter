@@ -13,22 +13,26 @@ counter/gauge/histogram API — is vendored **unmodified** from
 entirely upstream's. Everything below is this project's own work on top of that
 library:
 
-- **`lib/`** — nine small Lua modules. Six are pure logic with no
+- **`lib/`** — twelve small Lua modules. Six are pure logic with no
   environment-specific values (`route_sanitizer`, `host_classifier`,
   `client_subnet`, `gauge_expiry`, `source_attribution`, `app_toggle`),
-  kept unit-testable without a running nginx worker. `http_metrics.lua` and
-  `stream_metrics.lua` wire all of that into the `prometheus` API. And
-  `metrics_config.lua` is plain data — the one file here you're meant to
-  edit per deployment.
-- **`examples/openresty-sidecar/`** — `default.conf` (HTTP) and
-  `stream.conf` (TCP/UDP) show it all wired up; `nginx.conf` ties them
-  together; `k8s/` has a runnable, mock-data ConfigMaps + Deployment +
-  Service/ServiceMonitor example.
+  tested without a running nginx worker (`tests/`). `http_metrics.lua` and
+  `stream_metrics.lua` wire all of that into the `prometheus` API;
+  `self_identity.lua`, `intercept.lua` and `tls_intercept.lua` cover own
+  identity and https interception. `metrics_config.lua` is plain data — the
+  one file here you're meant to edit per deployment.
+- **`docker/`** — the image: `nginx.conf`, `conf.d/default.conf` (the inbound
+  and outbound servers, `/metrics`), `conf.d/intercept.conf` (https
+  interception) — the reference config for every feature.
+- **`examples/openresty-sidecar/`** — a runnable, mock-data Kubernetes
+  example: the app + sidecar Deployment with inbound, outbound and stream on,
+  `stream.conf`, Service/ServiceMonitor, kustomization.
 
 The six pure modules are unit-testable without a running nginx worker (they take
 values and return values); the orchestration modules are covered by the image's
 build-time smoke test. See [docs/modules.md](docs/modules.md#testing) for how to
-test each kind, and [docs/](docs/README.md) for the step-by-step mode guides.
+test each kind, and [docs/](docs/README.md) for the step-by-step feature
+guides: inbound, outbound, https interception (builds on outbound), stream.
 
 ## What each piece does
 
@@ -41,8 +45,9 @@ test each kind, and [docs/](docs/README.md) for the step-by-step mode guides.
 | Waypoint / XFCC override | `source_attribution.lua` | No |
 | Gauge expiry | `gauge_expiry.lua` | Only `:start()` |
 | Per-app metrics toggle | `app_toggle.lua` | No |
-| HTTP metrics + forward proxy | `http_metrics.lua` + `default.conf` | Yes |
-| Stream (TCP/UDP) metrics | `stream_metrics.lua` + `stream.conf` | Yes |
+| inbound + outbound metrics | `http_metrics.lua` + `docker/conf.d/default.conf` | Yes |
+| https interception | `intercept.lua` + `tls_intercept.lua` + `docker/conf.d/intercept.conf` | Yes |
+| stream (TCP/UDP) metrics | `stream_metrics.lua` + `stream.conf` | Yes |
 | Everything's config | `metrics_config.lua` | No — just data |
 
 ### Keeping request/response labels low-cardinality
@@ -96,7 +101,7 @@ in the mTLS-verified `X-Forwarded-Client-Cert` header instead.
 **Own identity (`self_identity.lua`).** The same PTR mechanism also answers
 "who am I": at startup each pod finds its own IP (kubelet writes
 `<pod-ip> <pod-hostname>` into `/etc/hosts`), reverse-resolves it, and uses
-the Service name and namespace it gets back for the outbound leg's
+the Service name and namespace it gets back for outbound's
 `source_service` and for every `app`/`namespace` label. That's what makes one
 shared config safe for several Deployments -- without it, a `metrics_config.lua`
 mounted into (say) both `app` and `consumers` pods can hold only one `app`
@@ -128,22 +133,23 @@ still completes one full pass — but treat that as a symptom, not a fix; the
 sanitization modules above are what should be keeping cardinality bounded
 in the first place.
 
-### Forward proxy (egress visibility)
+### outbound (egress visibility)
 
-A second, loopback-only `server{}` block (`127.0.0.1:3128`) turns this
-sidecar into an HTTP/HTTPS forward proxy for the app container's *outbound*
-traffic, sharing the same metrics pipeline via the `mode` label (`0` =
-inbound, `1` = outbound). Point `HTTP_PROXY`/`HTTPS_PROXY` at it and any
-compliant HTTP client routes through automatically. Plain HTTP gets full
+A second, loopback-only `server{}` block (`127.0.0.1:3128`) turns the sidecar
+into an HTTP/HTTPS forward proxy for the app container's *outbound* traffic,
+sharing the same metrics pipeline via the `mode` label (`"0"` = inbound, `"1"`
+= outbound). Point `HTTP_PROXY`/`HTTPS_PROXY` at it and any compliant HTTP
+client routes through automatically. Plain HTTP gets full
 method/route/status/timing. HTTPS arrives as `CONNECT host:port`; by default
 TLS stays end-to-end and only the `host:port` is recorded — enough for many
-apps, and the safe default. When you need the real method/route/status of
-outbound HTTPS, enable interception (below).
+apps, and the safe default.
 
-`CONNECT` is handled by nginx's native `ngx_http_tunnel_module` (`tunnel_pass`),
-present in the OpenResty base this image builds on — no third-party module and
-no custom build. The `:3128` server's only app-visible knob is its tunnel
-target, read from `lib/intercept.lua`:
+`CONNECT` is handled by nginx's native `ngx_http_tunnel_module` (`tunnel_pass`,
+nginx 1.31+, built by default), so no third-party module or core patch is
+needed — this replaces `ngx_http_proxy_connect_module`, whose upstream patch
+stops at nginx 1.27. `tunnel_pass` handles only CONNECT and a location takes
+one handler, so an `if` lets one listener serve both; the tunnel target comes
+from `lib/intercept.lua`, which is the only hook https interception needs:
 
 ```
 set_by_lua_block $connect_upstream { return require("intercept").upstream() }
@@ -153,288 +159,108 @@ if ($request_method = CONNECT) { tunnel_pass $connect_upstream; }
 With interception off, `upstream()` returns the real `host:port` — identical to
 a bare `tunnel_pass;`.
 
-### Seeing outgoing HTTPS details (optional interception)
+### https interception (depends on outbound)
 
-When `CONNECT host:port` isn't enough and you need the real method, route and
-status of outbound HTTPS, the sidecar can intercept it: a loopback terminator
-(`127.0.0.1:3129`, baked into the image via `conf.d/intercept.conf` +
-`lib/tls_intercept.lua`) mints a per-SNI leaf cert signed by a CA you provide,
-records the decrypted request, and re-originates to the real destination over a
-**verified** TLS connection (`proxy_ssl_verify on`). Off unless turned on, per
-app. All the machinery is baked in; a deployment enables it with one env var and
-a mounted CA.
+When `CONNECT host:port` isn't enough, the sidecar can decrypt outbound HTTPS:
+`:3128` hands an intercepted CONNECT to a loopback terminator
+(`127.0.0.1:3129`, `docker/conf.d/intercept.conf`), which mints a per-SNI leaf
+cert signed by a CA you mount (`lib/tls_intercept.lua`), records the decrypted
+request with the same `record()`, and re-originates to the real destination
+over **verified** TLS (`proxy_ssl_verify on` against
+`/etc/nginx/intercept/trusted-ca.crt`, the distro bundle). Because it only ever
+sees CONNECTs that reached `:3128`, it does nothing without outbound.
 
-**On the sidecar** (nginx container): set `INTERCEPT_TLS=on` and mount a CA
-keypair at `/etc/nginx/intercept/ca.crt` + `ca.key` (nginx only — the app never
-gets the key). Optional: `INTERCEPT_TLS_PORTS` (comma list, default `443`) and
-`INTERCEPT_BYPASS` (hosts to leave as plain CONNECT — outbound-mTLS or
-cert-pinned destinations). The switches are declared for workers in the baked
-`main.d/intercept-env.conf`, so `nginx.conf` needs no change.
+Off unless `INTERCEPT_TLS=on` and a CA keypair is mounted at
+`/etc/nginx/intercept/ca.crt` + `ca.key` (nginx only — the app gets the cert,
+never the key). `INTERCEPT_TLS_PORTS` (default `443`) and `INTERCEPT_BYPASS`
+(mTLS / cert-pinned hosts) narrow it. `intercept.should()` is the single
+decision for both routing and counting, so an intercepted call is recorded once
+(decrypted), never also as its outer CONNECT.
 
-**On the app** — two things, and only the second differs per language:
+The CA is a trust anchor — whoever holds its key can impersonate any site to
+every pod that trusts it. The per-runtime trust setup (PHP, .NET, Node, Go,
+Java), the replace-vs-append caveat, and the security model are in
+[docs/https-interception.md](docs/https-interception.md).
 
-1. *Route egress through the proxy.* Set `HTTP_PROXY`/`HTTPS_PROXY` (and the
-   lowercase forms) to `http://127.0.0.1:3128`. If you already use the forward
-   proxy in CONNECT mode, this is done.
-2. *Trust the CA*, or the client rejects the minted cert:
+### stream (TCP/UDP)
 
-   | runtime | trust the CA via |
-   |---|---|
-   | libcurl / curl | `CURL_CA_BUNDLE`, or PHP `curl.cainfo` |
-   | Python `requests` | `REQUESTS_CA_BUNDLE` |
-   | Node.js | `NODE_EXTRA_CA_CERTS` *(appends)* |
-   | Go | `SSL_CERT_FILE` / `SSL_CERT_DIR` |
-   | .NET | OS trust store (`update-ca-certificates`), or `SSL_CERT_FILE` / `SSL_CERT_DIR` |
-   | Java | `keytool -import` into the JVM truststore |
-   | generic OpenSSL | `SSL_CERT_FILE` / `SSL_CERT_DIR` |
+`stream.conf` / `stream_metrics.lua` is the stream-module counterpart, for
+anything proxied at L4 (Redis in the example): connection counts, bytes,
+session duration, upstream connect and first-byte time. It keeps its own
+Prometheus registry on its own port (`:9254`) rather than sharing `:9145`,
+because nginx can't share a shared dict between the http and stream modules.
+Each destination gets its own `server{}` with `set $destination_name "..."`,
+feeding both the `destination` label and the per-destination toggle below. A
+stream server speaks raw TCP, so the exposition server's `collect()` parses
+the scraper's HTTP request and writes the HTTP response itself. Independent of
+the HTTP features; off in the image until a `stream {}` include is mounted.
 
-> **Replace vs append.** Most of these (`curl.cainfo`, `REQUESTS_CA_BUNDLE`,
-> `SSL_CERT_FILE`) *replace* the trust store, so the client then trusts **only**
-> your CA — complete when every TLS destination it reaches is intercepted
-> (proxy-only egress, all on an intercepted port, nothing bypassed). If the same
-> client also reaches TLS you don't intercept, give it a combined bundle (system
-> CAs + your CA) or use an appending mechanism (`NODE_EXTRA_CA_CERTS`, or the OS
-> trust store via `update-ca-certificates`).
+### Per-leg metrics toggle
 
-**PHP (php-fpm).** Trust the CA in `php.ini`, mount `ca.crt` (cert only) into the
-app at `/etc/intercept/ca.crt`, and make sure the proxy vars reach the workers
-(`clear_env = no` in `www.conf`, inheriting the container env, or
-`env[HTTPS_PROXY] = ...` explicitly):
-
-```ini
-[curl]
-curl.cainfo = /etc/intercept/ca.crt
-```
-
-`curl.cainfo` only affects libcurl, so PDO/MySQL TLS and the like are untouched.
-
-**.NET.** `HttpClient` reads `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` from the
-environment automatically (Linux, .NET Core 3.1+), so egress routing needs no
-code. For trust, .NET validates against the OS store via OpenSSL: add your CA to
-it — copy `ca.crt` into `/usr/local/share/ca-certificates/` and run
-`update-ca-certificates` in the app image (this *appends*, so public TLS keeps
-working) — or point `SSL_CERT_FILE` at a bundle that includes your CA (replace
-caveat above). Don't reach for a per-call
-`ServerCertificateCustomValidationCallback` that returns `true`: that disables
-verification instead of trusting your CA.
-
-**The CA.** One per namespace, key in a Secret, never in git:
-
-```
-openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-  -keyout ca.key -out ca.crt -subj "/CN=<namespace>-intercept-ca"
-kubectl -n <namespace> create secret generic intercept-ca \
-  --from-file=ca.crt=ca.crt --from-file=ca.key=ca.key
-```
-
-Mount that Secret into nginx (`ca.crt`+`ca.key`) and, with `subPath: ca.crt`,
-into the app (cert only). Rotate by recreating the Secret and restarting the
-pod. The CA is a trust anchor — whoever holds the key can impersonate any site
-to every pod that trusts it — so scope it to one namespace with tight RBAC.
-
-### Stream (TCP/UDP) proxy metrics
-
-`stream.conf` / `stream_metrics.lua` is the stream-module counterpart to
-the above, for anything proxied at the TCP/UDP layer (Redis in the
-example): connection counts, bytes sent/received, session duration, and
-upstream connect-time/first-byte-time. It keeps its own Prometheus registry
-on its own port (`:9254`) rather than sharing the HTTP side's `/metrics`,
-because nginx can't share a shared dict between the http and stream modules
-(see upstream's own [Usage in stream
-module](README.md#usage-in-stream-module) note). Each destination gets its
-own `server{}` block with `set $destination_name "..."`, feeding both the
-`destination` label and the per-app toggle below; needs
-`ngx_stream_lua_module` (stock in OpenResty) and its own Prometheus scrape
-job.
-
-### Per-app metrics toggle
-
-`app_toggle.enabled(apps, key)` lets you turn off metrics for one leg of
-traffic — the forward-proxy leg (`apps.forward_proxy`) or one stream
-destination (`apps.stream.<name>`) — without touching the traffic itself.
-No entry, or an entry without `metrics_enabled = false`, means enabled: this
-is opt-out, not opt-in, so a new destination gets metrics by default.
+`app_toggle.enabled(apps, key)` turns off metrics for one leg of traffic —
+outbound (`apps.outbound`) or one stream destination (`apps.stream.<name>`) —
+without touching the traffic itself. No entry, or an entry without
+`metrics_enabled = false`, means enabled: opt-out, not opt-in, so a new
+destination gets metrics by default.
 
 ---
 
-## Known issue corrected in this project
+## The image
 
-Upstream's version of this config hardcoded the `/metrics` endpoint's own
-connection-metric labels as string literals that had drifted from the
-`app`/`namespace` values used everywhere else — silently splitting one
-time series into two. This project reads them from `metrics_config.lua`
-consistently instead. If you maintain copies of this config elsewhere,
-check for the same drift.
+`.github/workflows/openresty-image.yml` follows
+[openresty/docker-openresty](https://github.com/openresty/docker-openresty)
+every 6 hours. For the newest `<openresty-version>-<revision>` release it reads,
+from Docker Hub, every flavor upstream published (`<release>-<flavor>` tags,
+minus the per-arch ones) and the platforms each flavor has, then runs one
+matrix job per flavor: layer this repo onto
+`openresty/openresty:<release>-<flavor>` (`docker/Dockerfile`), smoke-test the
+amd64 build (inbound, outbound, and https interception with a throwaway CA),
+and push all platforms. Nothing is compiled. Flavors that aren't
+on Docker Hub yet are picked up by a later run; on a schedule, flavors whose
+image already exists are skipped. Pushes to `main` that touch `lib/`,
+`vendor/` or `docker/` rebuild every flavor of the newest release;
+`workflow_dispatch` takes any release (OpenResty 1.31+, for native CONNECT) and
+an optional flavor list.
 
----
+Tags are docker-openresty's, under `ghcr.io/<owner>/openresty-prometheus-exporter`:
 
-## Using this project
+| Tag | Example | Meaning |
+|---|---|---|
+| `<release>-<flavor>` | `1.31.1.1-4-alpine` | that release and flavor, rebuilt when this repo changes |
+| `<version>-<flavor>` | `1.31.1.1-alpine` | newest revision of that OpenResty version |
+| `<series>-<flavor>` | `1.31-alpine` | newest release in that series |
+| `<flavor>` | `alpine` | newest release |
+| `latest` | | newest release, `bookworm` (upstream's choice for its `latest`) |
 
-**Just the library, no additions** — this project behaves exactly like
-upstream; point `lua_package_path` at the repo root and use `prometheus.lua`
-directly. See the upstream `README.md` above for the full API.
+Pin by digest for an immutable reference; `org.opencontainers.image.revision`
+names the commit.
 
-**The full sidecar example** — add `lib/` to `lua_package_path` alongside
-the repo root, then either pull in one module you want (they're all
-independent — e.g. `require("route_sanitizer").sanitize(ngx.var.request_uri)`
-in your own `log_by_lua_block`), or copy `default.conf`/`stream.conf`
-as-is and edit `lib/metrics_config.lua` for your environment (app/namespace
-names, `static_ranges`, `ptr_dns_server`, `cluster_ip_prefix`). The
-forward-proxy leg works out of the box — CONNECT uses nginx's native tunnel
-module, no patched build; to decrypt outbound HTTPS see "Seeing outgoing HTTPS
-details".
-
-**As a Kubernetes sidecar** — `examples/openresty-sidecar/k8s/` has a
-complete, mock-data example: ConfigMaps for `nginx.conf`/`default.conf`/
-`stream.conf`/`metrics_config.lua`, a Deployment showing the app+nginx
-container pair, and a Service/ServiceMonitor exposing both metrics
-endpoints. Replace every mock name, image, and label before applying.
-
-Either way, `/metrics` starts returning labeled series immediately — nginx
-loads `.lua` files from `lua_package_path` at request time, no build step
-needed for the Lua side.
-
----
-
-## Prebuilt image
-
-`.github/workflows/openresty-image.yml` watches
-[openresty/docker-openresty](https://github.com/openresty/docker-openresty/tags)
-every 6 hours. When a new `<openresty-version>-<revision>` tag appears and its
-official `openresty/openresty:<tag>-alpine` image is on Docker Hub, it layers
-this repo on top of that image (`docker/Dockerfile`), smoke-tests the result,
-and pushes. Nothing is compiled. If the tag is not on Docker Hub yet, the run
-skips and the next one checks again.
-
-| Tag | Meaning |
-|---|---|
-| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<openresty-version>` | e.g. `1.31.1.1`: newest build for that OpenResty version |
-| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<upstream-tag>` | e.g. `1.31.1.1-4`: that docker-openresty release, rebuilt when this repo changes |
-| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:<upstream-tag>-<sha7>` | immutable: that release + this commit |
-| `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:latest` | newest upstream release |
-
-Pushes to `main` that touch the Lua or `docker/` rebuild the newest upstream
-release; `workflow_dispatch` builds any tag (OpenResty 1.31+, for native
-CONNECT support).
+One `docker/Dockerfile` serves every flavor. `docker/setup.sh` adapts what
+differs between them: it asks `nginx -V` for the config path (so
+`/usr/local/openresty-debug/...` works too) and links it to
+`/etc/nginx/nginx.conf`; it installs `ca-certificates` where the flavor lacks
+it (Alpine) and links whichever bundle the distro has to
+`/etc/nginx/intercept/trusted-ca.crt`. The fallback certificate `:3129` needs
+to start is made in a build stage, so no flavor needs openssl.
 
 Inside the image:
 
 - `/opt/prometheus/` holds `prometheus*.lua` and `lib/`; mount your own
-  `lib/metrics_config.lua` over the baked one, as before.
-- `/etc/nginx/nginx.conf` (`/usr/local/openresty/nginx/conf/nginx.conf` is a
-  symlink to it) and `/etc/nginx/conf.d/default.conf` are a transparent
-  default: `:80` reverse-proxies to `127.0.0.1:$APP_PORT` (default `8080`)
-  without touching the request, `127.0.0.1:3128` is the forward proxy, and
-  `:9145` serves `/metrics`, `/nginx_status` and `/healthz`.
-- Stream is off. Drop a file containing
+  `lib/metrics_config.lua` over the baked one.
+- `/etc/nginx/nginx.conf` and `/etc/nginx/conf.d/default.conf` are a
+  transparent default: inbound on `:80` reverse-proxies to
+  `127.0.0.1:$APP_PORT` (default `8080`) without touching the request,
+  outbound listens on `127.0.0.1:3128`, and `:9145` serves `/metrics`,
+  `/nginx_status` and `/healthz`. https interception is baked in and off.
+- stream is off. Drop a file containing
   `stream { include /etc/nginx/stream.d/*.conf; }` into `/etc/nginx/main.d/`
   and your `stream.conf` into `/etc/nginx/stream.d/` to turn it on.
 
-The forward proxy uses nginx's native CONNECT support
-(`ngx_http_tunnel_module`, nginx 1.31+, built by default), so no third-party
-module or core patch is needed. CONNECT goes to `tunnel_pass`, everything else
-to `proxy_pass`:
+Local build (any flavor):
 
 ```
-location / {
-    if ($request_method = CONNECT) {
-        tunnel_pass;
-    }
-    proxy_pass http://$http_host$request_uri;
-}
-```
-
-`tunnel_pass` handles only CONNECT (405 otherwise) and a location takes one
-handler, so the `if` is what lets one listener serve both. This replaces
-`ngx_http_proxy_connect_module`, whose upstream patch stops at nginx 1.27.
-
-Local build:
-
-```
-docker buildx build --build-arg OPENRESTY_TAG=1.31.1.1-4 \
+docker buildx build --build-arg OPENRESTY_TAG=1.31.1.1-4-bookworm \
   -f docker/Dockerfile -t openresty-prometheus:local .
 ```
 
----
-
-## Changelog
-
-Dated entries for this project's own additions. Upstream's `CHANGELOG.md` is
-unaffected — none of its files are touched here.
-
->### 2026-10-20
-
-- **Optional HTTPS interception** for the forward proxy — record the real
-  method/route/status of outbound HTTPS instead of only `CONNECT host:port`.
-  The machinery is baked into the image: `lib/intercept.lua` (the per-CONNECT
-  decision), `conf.d/intercept.conf` (the `ssl_mint_cache` dict and the
-  `127.0.0.1:3129` TLS terminator, which mints per-SNI leaf certs via
-  `lib/tls_intercept.lua` and re-originates over verified TLS), and
-  `main.d/intercept-env.conf` (declares the env switches for workers). An app's
-  `default.conf` opts in with one line in its `:3128` block —
-  `tunnel_pass $connect_upstream;` fed by `require("intercept").upstream()` —
-  so no maps, dict or `:3129` server live in `default.conf`. Off by default:
-  with `INTERCEPT_TLS` unset the proxy passes CONNECT through unchanged and
-  `:3129` stays idle. Enable per deployment with `INTERCEPT_TLS=on` plus a
-  mounted CA (nginx gets `ca.crt`+`ca.key`; the app trusts `ca.crt`); ports
-  default to 443 (`INTERCEPT_TLS_PORTS`), mTLS/pinned hosts go in
-  `INTERCEPT_BYPASS`. `record()` counts each call once via `intercept.should()`,
-  so routing and metrics share one decision. See "Seeing outgoing HTTPS
-  details".
-
-### 2026-10-19
-
-- The image is now `FROM openresty/openresty:<tag>-alpine` (official, current
-  Alpine) instead of compiling docker-openresty's `alpine/Dockerfile`:
-  `docker-bake.hcl` is gone, builds take seconds, and a release is built once
-  its official image is on Docker Hub. The forward proxy stays on nginx's
-  native CONNECT support, with no third-party module.
-- `lib/http_metrics.lua`: requests nginx rejects before the access phase (400,
-  405, 413, `deny`) are recorded with `source_service="unknown"` instead of
-  failing with "incorrect label count".
-
-### 2026-10-17
-
-- Added `.github/workflows/openresty-image.yml`, `docker-bake.hcl` and
-  `docker/`: an image built from each new docker-openresty release with this
-  repo baked in (see "Prebuilt image" above).
-- `lib/metrics_config.lua`: restored the `own_namespace` lookup (lost in
-  `4da5d7e`, which left `http.namespace` as `nil` and made every
-  connection metric fail with "incorrect label count"), and
-  `ptr_dns_server` now defaults to the first nameserver in
-  `/etc/resolv.conf` instead of a hardcoded IP.
-
-### 2026-09-20
-
-- Fixed `nginx_stream_connections_active` always reporting 0. It was read
-  from `$connections_active` and friends, which come from
-  `ngx_http_stub_status_module` and don't exist in the stream module (the
-  `or 0` fallback hid that). The gauge is now maintained by hand: `+1` from
-  the new `stream_metrics.connection_open()` (call it from
-  `preread_by_lua_block` in every stream `server{}`), `-1` from `record()`.
-  Only `state="active"` is exported now; `reading`/`writing`/`waiting` have
-  no stream equivalent and were removed. A `server{}` without the preread
-  hook is simply not counted.
-- Added `lib/self_identity.lua` and `Resolver:resolve_ptr()`: the pod's own
-  service/namespace is now discovered via PTR instead of read from
-  `metrics_config.lua`'s `http.app`/`http.namespace` (kept as fallback; turn off
-  with `http.discover_identity = false`). Fixes every pod sharing a config
-  reporting itself as one hard-coded service. `http_metrics.lua` now reads
-  identity through `own()` for the outbound `source_service`, the `app` and
-  `namespace` labels, and the connection gauges.
-
-### 2026-09-18
-
-- Added `lib/app_toggle.lua`, wired into `default.conf` (forward-proxy leg)
-  and `stream.conf` (per-destination).
-- Added `examples/openresty-sidecar/stream.conf`: full TCP/UDP proxy
-  metrics, reusing `lib/gauge_expiry.lua`.
-- Added `examples/openresty-sidecar/nginx.conf` and
-  `examples/openresty-sidecar/k8s/` (mock-data ConfigMaps, a sample sidecar
-  Deployment, a Service/ServiceMonitor pair) so the example deploys
-  end-to-end instead of just being read.
-- Restructured `default.conf`/`stream.conf` down to wiring + `server{}`
-  blocks only (397 → 91 and 231 → 60 lines). Added `lib/metrics_config.lua`
-  (all environment-specific values) and `lib/http_metrics.lua`/
-  `lib/stream_metrics.lua` (the orchestration that used to be inline,
-  now proper modules built on the existing pure `lib/` modules).
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).

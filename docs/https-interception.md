@@ -1,4 +1,4 @@
-# Mode 3 — Outbound HTTPS details (opt-in TLS interception)
+# https interception — see inside outbound HTTPS
 
 Turn outbound HTTPS from an opaque `CONNECT host:port` line into the **real**
 method, route, and status — `GET /v2/orders → 404` instead of just
@@ -8,8 +8,9 @@ This is **TLS interception** (a MITM of your app's own egress, inside your own
 trust domain). It is off by default and enabled per deployment. Read the
 [security model](#security-model) before enabling it in production.
 
-Prerequisites: [Mode 1](mode-1-inbound-l7.md) + [Mode 2](mode-2-outbound-l7.md)
-(the app already routes egress through `:3128`).
+**Depends on [outbound](outbound.md)**: it only acts on CONNECTs that already
+arrive at `:3128`, so the app's egress must go through outbound first.
+Independent of [inbound](inbound.md) and [stream](stream.md).
 
 ---
 
@@ -24,7 +25,7 @@ app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :312
                                                                VERIFIED TLS (proxy_ssl_verify on)
 ```
 
-1. The app opens `CONNECT api:443` as usual (Mode 2).
+1. The app opens `CONNECT api:443` as usual (outbound).
 2. [`intercept.should()`](modules.md#interceptlua) decides, per CONNECT, whether
    this is an intercepted port on a non-bypassed host. If yes, `:3128` tunnels
    it to the local terminator `127.0.0.1:3129` instead of the real host.
@@ -63,7 +64,7 @@ Set the switch and mount the CA **keypair** — nginx only:
 
 ```yaml
 - name: nginx
-  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4
+  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4-alpine
   env:
     - name: APP_PORT
       value: "8080"
@@ -163,9 +164,6 @@ step 3 above).
 
 **4. Enable** on the nginx container (`INTERCEPT_TLS=on` + CA keypair mounted).
 
-A real-world write-up of these exact four mounts lives alongside the
-[k8s example](../examples/openresty-sidecar/k8s/).
-
 ---
 
 ## .NET notes
@@ -204,7 +202,7 @@ trust domain you control, and only if you respect these:
 - **Can't-intercept destinations exist.** A service your app reaches with its
   own client certificate (outbound mTLS), or one it pins certificates for,
   cannot be intercepted without breaking it. Put those in `INTERCEPT_BYPASS` —
-  they fall back to plain `CONNECT host:port` (Mode 2 visibility), which is the
+  they fall back to plain `CONNECT host:port` (outbound visibility), which is the
   physical limit: you can't read inside a tunnel you didn't terminate.
 
 See also the **trust boundary** note on the XFCC override in
@@ -216,7 +214,7 @@ same discipline.
 ## Scope & limits
 
 - Only ports in `INTERCEPT_TLS_PORTS` (default `443`) are intercepted; every
-  other TLS port falls through to Mode 2's `CONNECT host:port` view. To
+  other TLS port falls through to outbound's `CONNECT host:port` view. To
   intercept another port it must also be re-originated correctly — the baked
   `:3129` re-originates on the destination's own port via `$host$request_uri`,
   so standard HTTPS ports work; exotic setups may need a dedicated terminator.
@@ -235,8 +233,8 @@ same discipline.
 | App: `SSL certificate problem: unable to get local issuer certificate` | The app doesn't trust your CA — the trust step (3) isn't applied, or applied to a client that reads a different bundle. For curl test manually: `curl --cacert /etc/intercept/ca.crt https://host/` |
 | Metrics still show `method="CONNECT"` | Interception didn't fire: `INTERCEPT_TLS` not `on`, CA not mounted, port not in `INTERCEPT_TLS_PORTS`, or host is in `INTERCEPT_BYPASS` |
 | `502`/`504` on a specific host after enabling | Re-origination's `proxy_ssl_verify` rejected the real cert (good — bad/expired upstream cert), **or** egress to that host is blocked. Check `kubectl logs <pod> -c nginx` for `certificate verify failed` vs a connect timeout |
-| `CONNECT tunnel failed, response 500` right after enabling | A Lua error on the `:3129` leg — almost always a CA read/parse problem. `kubectl logs <pod> -c nginx` will have a `tls_intercept:` line naming it (can't read CA, parse failure) |
+| `CONNECT tunnel failed, response 500` right after enabling | A Lua error on the `:3129` leg — almost always a CA read/parse problem. `kubectl logs <pod> -c nginx` will have a `tls_intercept:` line naming it (can't read CA, parse failure). `Permission denied` on `ca.key` means the file isn't readable by the nginx workers (they don't run as root): keep the Secret's default `0644`, or set `defaultMode` accordingly |
 | Works for curl, not for the app's own calls | The app uses a client that reads a different trust store than the one you configured (e.g. PHP streams, not libcurl; or Python without `REQUESTS_CA_BUNDLE`) |
-| `openresty -t` fails after a config change | The `:3129` server needs the baked `fallback.crt`/`fallback.key` and `ssl_mint_cache` — don't remove `conf.d/intercept.conf` or `main.d/intercept-env.conf` from the image |
+| `nginx -t` fails after a config change | The `:3129` server needs the baked `fallback.crt`/`fallback.key` and `ssl_mint_cache` — don't remove `conf.d/intercept.conf` or `main.d/intercept-env.conf` from the image |
 
-Next: [Mode 4 — L4 stream](mode-4-stream-l4.md).
+Next: [stream](stream.md).

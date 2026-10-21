@@ -6,11 +6,11 @@
 -- This file has no environment-specific values in it; edit
 -- metrics_config.lua instead.
 --
--- Wired up from stream.conf as:
+-- Wired up from stream.conf (examples/openresty-sidecar/stream.conf) as:
 --   init_worker_by_lua_block { require("stream_metrics").init() }
 --   preread_by_lua_block     { require("stream_metrics").connection_open() }  -- inside each destination's server{}
 --   log_by_lua_block         { require("stream_metrics").record() }   -- inside each destination's server{}
---   content_by_lua_block     { ngx.print(require("stream_metrics").metric_data()) }
+--   content_by_lua_block     { require("stream_metrics").collect() }   -- the :9254 exposition server
 --
 -- Source labels (source_service / source_namespace, off unless enabled in
 -- metrics_config.stream): who opened the connection. Same meaning as on the
@@ -300,10 +300,42 @@ function _M.record()
     end
 end
 
--- exposed for the :9254 exposition server -- this exporter's own registry
--- only; the HTTP registry is scraped separately on :80/metrics.
+-- Stream registry as exposition text (no HTTP framing).
 function _M.metric_data()
     return table.concat(prometheus_stream:metric_data())
+end
+
+-- content_by_lua_block of the stream exposition server (:9254). A stream
+-- server speaks raw TCP, so this reads the scraper's HTTP request itself and
+-- answers with a minimal HTTP/1.1 response -- printing bare exposition text
+-- would be rejected by Prometheus as a malformed HTTP response.
+function _M.collect()
+    local sock, err = ngx.req.socket(true)
+    if not sock then
+        ngx.log(ngx.ERR, "stream_metrics: no downstream socket: ", err)
+        return
+    end
+    sock:settimeout(5000)
+
+    local request_line = sock:receive("*l")
+    -- drain the request headers (bounded) so closing doesn't reset the
+    -- connection before the scraper has read the response
+    for _ = 1, 100 do
+        local line = sock:receive("*l")
+        if not line or line == "" then break end
+    end
+
+    local status, body = "200 OK", nil
+    if request_line and request_line:match("^GET /metrics[ ?]") then
+        body = _M.metric_data()
+    else
+        status, body = "404 Not Found", "not found\n"
+    end
+    ngx.print("HTTP/1.1 ", status, "\r\n",
+              "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n",
+              "Content-Length: ", #body, "\r\n",
+              "Connection: close\r\n\r\n",
+              body)
 end
 
 return _M
