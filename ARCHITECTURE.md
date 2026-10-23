@@ -224,16 +224,23 @@ an optional flavor list.
 
 Tags are docker-openresty's, under `ghcr.io/<owner>/openresty-prometheus-exporter`:
 
-| Tag | Example | Meaning |
-|---|---|---|
-| `<release>-<flavor>` | `1.31.1.1-4-alpine` | that release and flavor, rebuilt when this repo changes |
-| `<version>-<flavor>` | `1.31.1.1-alpine` | newest revision of that OpenResty version |
-| `<series>-<flavor>` | `1.31-alpine` | newest release in that series |
-| `<flavor>` | `alpine` | newest release |
-| `latest` | | newest release, `bookworm` (upstream's choice for its `latest`) |
+| Tag | Meaning |
+|---|---|
+| `<release>-<flavor>` | that release and flavor, rebuilt when this repo changes |
+| `<version>-<flavor>` | newest revision of that OpenResty version |
+| `<series>-<flavor>` | newest release in that series |
+| `<flavor>` | newest release |
+| `latest` | newest release, `alpine` (`LATEST_FLAVOR`; upstream's own `latest` is bookworm) |
 
 Pin by digest for an immutable reference; `org.opencontainers.image.revision`
 names the commit.
+
+After the builds, a `catalog` job reads the newest release's images back from
+GHCR and rewrites `docs/images.md` (flavors, tags, platforms, pull commands,
+digests), committing only when it changed. It runs on every scheduled run too,
+so the file catches up with flavors that appear later. No release number is
+written by hand anywhere else in the docs. `retry.yml` re-runs the failed jobs
+of a failed image run, up to 2 times.
 
 One `docker/Dockerfile` serves every flavor. `docker/setup.sh` adapts what
 differs between them: it asks `nginx -V` for the config path (so
@@ -259,7 +266,7 @@ Inside the image:
 Local build (any flavor):
 
 ```
-docker buildx build --build-arg OPENRESTY_TAG=1.31.1.1-4-bookworm \
+docker buildx build --build-arg OPENRESTY_TAG=alpine \
   -f docker/Dockerfile -t openresty-prometheus:local .
 ```
 

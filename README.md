@@ -65,6 +65,7 @@ and L4 streams, one tab each.
 
 - **[Documentation index](docs/README.md)** — all guides, start here
 - **Features** — [inbound](docs/inbound.md) · [outbound](docs/outbound.md) · [https interception](docs/https-interception.md) · [stream](docs/stream.md) · [own nginx](docs/standalone-nginx.md)
+- **[Images](docs/images.md)** — current release, tags per flavor, pull commands
 - **[Metrics reference](docs/metrics-reference.md)** — every metric and label, with PromQL
 - **[Grafana dashboard](grafana/)** — ready to import, one tab per area
 - **[Modules](docs/modules.md)** — maintainer's guide: what each `lib/` module does, why, how to change it
@@ -79,13 +80,17 @@ is rebuilt with this project baked in, **in every flavor upstream publishes**
 smoke-tested, and pushed to GHCR. **The tags are docker-openresty's own** — swap
 the image name and keep the tag:
 
-| `openresty/openresty:` | `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:` | Meaning |
-|---|---|---|
-| `1.31.1.1-4-alpine` | `1.31.1.1-4-alpine` | that release, that flavor |
-| `1.31.1.1-alpine` | `1.31.1.1-alpine` | newest revision of OpenResty 1.31.1.1 |
-| `1.31-alpine` | `1.31-alpine` | newest release in the 1.31 series |
-| `alpine` | `alpine` | newest release |
-| `latest` | `latest` | newest release, `bookworm` flavor |
+| Tag | Meaning |
+|---|---|
+| `<release>-<flavor>` | that docker-openresty release, that flavor |
+| `<version>-<flavor>` | newest revision of that OpenResty version |
+| `<series>-<flavor>` | newest release in that series |
+| `<flavor>`, e.g. `alpine` | newest release |
+| `latest` | newest release, `alpine` flavor (upstream's own `latest` is bookworm) |
+
+**[docs/images.md](docs/images.md) lists the current release, every flavor's
+tags and platforms, and ready-to-copy pull commands** (by tag and by digest).
+The image workflow regenerates and commits it whenever the registry changes.
 
 A tag is rebuilt when this repo's code changes, so for an immutable reference
 pin the digest (`…@sha256:…`); the image's `org.opencontainers.image.revision`

@@ -64,7 +64,7 @@ Set the switch and mount the CA **keypair** — nginx only:
 
 ```yaml
 - name: nginx
-  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4-alpine
+  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:alpine
   env:
     - name: APP_PORT
       value: "8080"

@@ -41,7 +41,7 @@ records every request. Point it at your app's port with `APP_PORT`.
 
 ```yaml
 - name: nginx
-  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.1.1-4-alpine  # any docker-openresty tag
+  image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:alpine  # pin a tag from docs/images.md
   env:
     - name: APP_PORT
       value: "8080"          # the port your app listens on

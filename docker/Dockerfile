@@ -1,5 +1,5 @@
 # One Dockerfile for every docker-openresty flavor. OPENRESTY_TAG is the full
-# upstream tag, flavor included, e.g. 1.31.1.1-4-alpine or 1.31.1.1-4-bookworm.
+# upstream tag, flavor included, e.g. <release>-alpine or <release>-bookworm.
 ARG BASE_IMAGE=openresty/openresty
 ARG OPENRESTY_TAG
 
