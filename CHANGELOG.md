@@ -3,6 +3,19 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-10-23
+
+- **`latest` is now Alpine** (was bookworm, as upstream). The flavor is one
+  variable in the image workflow, `LATEST_FLAVOR`.
+- **[`docs/images.md`](docs/images.md)** lists the newest release, every
+  flavor's tags and platforms, and pull commands by tag and by digest. The
+  image workflow's new `catalog` job regenerates it from GHCR and commits it
+  when it changes (it never committed before, so a new release such as
+  1.31.1.1-5 left the docs behind). Hand-written docs and examples no longer
+  name a release.
+- **Failed image runs are retried**: `retry.yml` re-runs the failed jobs up to
+  2 times.
+
 ### 2026-10-21
 
 - **Grafana dashboard** in [`grafana/`](grafana/): a v2-schema dashboard
