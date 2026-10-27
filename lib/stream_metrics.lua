@@ -121,7 +121,10 @@ function _M.init()
             source_on = true
             resolver = source_attribution.new_resolver{
                 dict              = dict,
-                cache_ttl         = http_cfg.ptr_cache_ttl,
+                refresh_interval  = http_cfg.ptr_refresh_interval or http_cfg.ptr_cache_ttl,
+                forget_after      = http_cfg.ptr_forget_after,
+                sync_timeout_ms   = http_cfg.ptr_sync_timeout,
+                ignore_services   = http_cfg.ptr_ignore_services,
                 dns               = { nameservers = {{ http_cfg.ptr_dns_server, 53 }}, timeout_ms = http_cfg.ptr_dns_timeout },
                 dynamic_prefix    = http_cfg.dynamic_prefix,
                 static_ranges     = http_cfg.static_ranges,
@@ -129,6 +132,7 @@ function _M.init()
                 default_namespace = http_cfg.default_namespace,
                 default_service   = http_cfg.probe_default_service,
             }
+            resolver:start()
             if http_cfg.discover_identity then
                 ident = self_identity.new{
                     resolver           = resolver,

@@ -78,9 +78,26 @@ time series per request:
 **`source_attribution.lua`** labels every inbound request with *who called
 it*, not just what happened — resolved in order: a hand-maintained
 `static_ranges` table for known internal subnets, then reverse-DNS (PTR)
-against CoreDNS for the dynamic pod range (cached in a shared dict, with an
-in-flight lock so a burst of requests from one uncached IP doesn't fire a
-PTR query per request), then a configured fallback if nothing resolves.
+against CoreDNS for the dynamic pod range, then a configured fallback if
+nothing resolves.
+
+PTR answers live in a shared dict and are **kept until a new answer replaces
+them** -- age alone never drops a caller back to the fallback, so a caller
+that shows up once every few minutes keeps its name. One worker re-resolves
+every known IP each `ptr_refresh_interval` (15s). Keep that at or below the
+Prometheus scrape interval: when Kubernetes hands an IP to a pod in another
+namespace, at most one scrape carries the old name. Each lookup ends as
+*found* (store it), *none* -- NXDOMAIN, nothing in the cluster owns the IP --
+(store the fallback, a real "unknown"), or *error* -- timeout, SERVFAIL --
+(keep what's stored). A never-seen IP is resolved inline in the access/preread
+phase with a `ptr_sync_timeout` (100ms) budget, falling back to a background
+lookup on error; an in-flight lock keeps a burst from one new IP to one query.
+IPs no request has come from for `ptr_forget_after` (5 min) are dropped, so only active callers are refreshed; a caller that returns later is resolved inline again. When a
+pod sits behind several Services it has one PTR record per Service; the
+alphabetically first name not matching `ptr_ignore_services` wins, so the
+label doesn't flip between them. Staleness is also bounded by the DNS
+server's own cache: point `ptr_dns_server` at CoreDNS rather than a node-local
+cache if that cache holds PTR answers longer than the scrape interval.
 Needs CoreDNS to actually have PTR records for pod IPs (not on by default in
 every cluster) and `resty.dns.resolver` on `LUA_PATH`.
 

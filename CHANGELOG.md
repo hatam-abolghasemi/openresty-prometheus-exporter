@@ -3,6 +3,26 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-10-27
+
+- **Caller identity no longer expires.** The PTR cache dropped every answer
+  after 15s and labelled the next request with the fallback, so any caller
+  slower than one request per 15s per peer IP (e.g. traffic through two
+  ingress replicas once a minute) always showed as `unknown.health-probe`.
+  Answers are now kept until a new answer replaces them; one worker
+  re-resolves every known IP each `ptr_refresh_interval` (15s, keep it at or
+  below the scrape interval), so a reassigned IP is relabelled within one
+  scrape. NXDOMAIN resets an IP to the fallback; timeouts and SERVFAIL keep
+  the previous answer. Only IPs that sent a request in the last `ptr_forget_after` (5 min) are refreshed; idle ones are dropped.
+- **New IPs resolve inline** (`ptr_sync_timeout`, 100ms) in the access/preread
+  phase instead of the first request always getting the fallback.
+- **Stable name when an IP has several PTR records** (one per Service selecting
+  the pod): the alphabetically first name not matching `ptr_ignore_services`
+  (default `-metrics`, `-headless`) is used, instead of whichever answer DNS
+  listed first.
+- `ptr_cache_ttl` is replaced by `ptr_refresh_interval` and still read as a
+  fallback.
+
 ### 2026-10-23
 
 - **`latest` is now Alpine** (was bookworm, as upstream). The flavor is one

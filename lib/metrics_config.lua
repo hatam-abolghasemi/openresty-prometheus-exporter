@@ -130,7 +130,10 @@ return {
 
         ptr_dns_server           = own_nameserver,  -- from /etc/resolv.conf; set an explicit IP to override
         ptr_dns_timeout          = 2000,  -- ms; lookup runs in a background timer, never on the request path
-        ptr_cache_ttl            = 15,    -- seconds, matches CoreDNS record TTL
+        ptr_refresh_interval     = 15,    -- seconds between re-resolving every known IP; keep <= the Prometheus scrape interval
+        ptr_forget_after         = 300,   -- seconds without a request before an IP stops being refreshed and is dropped; a returning caller is resolved inline again
+        ptr_sync_timeout         = 100,   -- ms; a never-seen IP is resolved inline with this timeout (nil = always background)
+        ptr_ignore_services      = { "%-metrics$", "%-headless$" },  -- Lua patterns; Services passed over when an IP has several PTR records
         probe_default_service    = "health-probe",  -- fallback for unresolved dynamic-range addresses (often kubelet probes)
         probe_default_namespace  = "default",
         waypoint_service_name    = "waypoint",  -- must match the Service name your mesh's waypoint Gateway creates

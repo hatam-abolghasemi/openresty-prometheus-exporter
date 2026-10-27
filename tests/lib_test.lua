@@ -130,7 +130,8 @@ test("http labels: values follow schema order", function()
     end
 end)
 
--- async resolver: never blocks, fills cache in the background
+-- resolver: keeps the last answer until a new one replaces it; background
+-- refresh relabels reassigned IPs within one interval
 do
     local sa = require("source_attribution")
     local function fake_dict()
@@ -140,53 +141,170 @@ do
             set = function(_, k, v) d[k] = v; return true end,
             add = function(_, k, v) if d[k] ~= nil then return false end d[k] = v; return true end,
             delete = function(_, k) d[k] = nil end,
+            get_keys = function()
+                local keys = {}
+                for k in pairs(d) do keys[#keys + 1] = k end
+                table.sort(keys)
+                return keys
+            end,
             raw = d,
         }
     end
-    local function make(answer)
-        local queued, queries = {}, 0
+    local function ptr(...)
+        local answers = {}
+        for i, name in ipairs({...}) do answers[i] = { ptrdname = name } end
+        return answers
+    end
+    local ORDERS = "10-233-1-2.orders.shop.svc.cluster.local."
+    local BILLING = "10-233-1-2.billing.pay.svc.cluster.local."
+    local NXDOMAIN = { errcode = 3, errstr = "name error" }
+
+    -- answer: what DNS returns now (mutable via st.answer); opts merged in
+    local function make(answer, opts)
+        local st = { answer = answer, queued = {}, queries = 0, clock = 1000, timers = {} }
         local lib = { TYPE_PTR = 12 }
-        function lib:new() return { query = function() queries = queries + 1; return answer end } end
-        local dict = fake_dict()
-        local r = sa.new_resolver{
-            dict = dict, resolver_lib = lib, dynamic_prefix = {10, 233},
+        function lib:new()
+            return { query = function() st.queries = st.queries + 1; return st.answer end }
+        end
+        st.dict = fake_dict()
+        local o = {
+            dict = st.dict, resolver_lib = lib, dynamic_prefix = {10, 233},
             default_service = "health-probe", default_namespace = "default",
-            spawn = function(_, fn) queued[#queued + 1] = fn; return true end,
+            refresh_interval = 15, forget_after = 3600, sync_timeout_ms = 100,
+            spawn = function(_, fn) st.queued[#st.queued + 1] = fn; return true end,
+            every = function(interval, fn) st.timers[#st.timers + 1] = { interval, fn }; return true end,
+            now = function() return st.clock end,
+            can_block = function() return true end,
+            is_leader = function() return true end,
         }
-        return r, queued, function() return queries end, dict
+        for k, v in pairs(opts or {}) do o[k] = v end
+        st.r = sa.new_resolver(o)
+        return st
     end
     local ip = "10.233.77.216"
 
-    test("resolver: miss returns defaults without querying DNS", function()
-        local r, queued, q = make({{ ptrdname = "10-233-1-2.orders.shop.svc.cluster.local." }})
-        local svc, ns = r:resolve(ip)
+    test("pick_ptr: deterministic across answer order", function()
+        local a = "10-233-69-143.my-service.ingress-nginx.svc.cluster.local."
+        local b = "10-233-69-143.sahand-stg-ingress-nginx-controller.ingress-nginx.svc.cluster.local."
+        local m = "10-233-69-143.sahand-stg-ingress-nginx-controller-metrics.ingress-nginx.svc.cluster.local."
+        eq((sa.pick_ptr(ptr(b, m, a), { "%-metrics$" })), "my-service")
+        eq((sa.pick_ptr(ptr(m, a, b), { "%-metrics$" })), "my-service")
+        eq((sa.pick_ptr(ptr(m, a, b), { "%-metrics$", "^my%-service$" })), "sahand-stg-ingress-nginx-controller")
+    end)
+    test("pick_ptr: ignored names still used when nothing else is left", function()
+        local svc, ns = sa.pick_ptr(ptr("10-233-1-2.app-metrics.shop.svc.cluster.local."), { "%-metrics$" })
+        eq(svc, "app-metrics"); eq(ns, "shop")
+    end)
+
+    test("resolver: miss without sync returns defaults and queues one lookup", function()
+        local st = make(ptr(ORDERS), { sync_timeout_ms = false })
+        local svc, ns = st.r:resolve(ip)
         eq(svc, "health-probe"); eq(ns, "default")
-        eq(q(), 0); eq(#queued, 1)
+        eq(st.queries, 0); eq(#st.queued, 1)
+        st.queued[1](false)
+        eq(st.dict.raw["inflight:" .. ip], nil)
+        eq((st.r:resolve(ip)), "orders")
     end)
-    test("resolver: background lookup fills cache, next request hits it", function()
-        local r, queued, q, dict = make({{ ptrdname = "10-233-1-2.orders.shop.svc.cluster.local." }})
-        r:resolve(ip); queued[1](false)
-        eq(q(), 1); eq(dict.raw["inflight:" .. ip], nil)
-        local svc, ns = r:resolve(ip)
-        eq(svc, "orders"); eq(ns, "shop"); eq(#queued, 1)
+    test("resolver: miss in a blocking phase resolves inline", function()
+        local st = make(ptr(ORDERS), { sync_timeout_ms = 100 })
+        local svc, ns = st.r:resolve(ip)
+        eq(svc, "orders"); eq(ns, "shop"); eq(#st.queued, 0)
+        eq(st.dict.raw["inflight:" .. ip], nil)
     end)
-    test("resolver: concurrent misses schedule one lookup", function()
-        local r, queued = make(nil)
-        r:resolve(ip); r:resolve(ip); r:resolve(ip)
-        eq(#queued, 1)
+    test("resolver: inline lookup error falls back to background", function()
+        local st = make(nil, { sync_timeout_ms = 100 })
+        eq((st.r:resolve(ip)), "health-probe")
+        eq(#st.queued, 1)
     end)
-    test("resolver: failed lookup caches defaults", function()
-        local r, queued = make(nil)
-        r:resolve(ip); queued[1](false)
-        local svc = r:resolve(ip)
-        eq(svc, "health-probe"); eq(#queued, 1)
+    test("resolver: inline not attempted outside blocking phases", function()
+        local st = make(ptr(ORDERS), { sync_timeout_ms = 100, can_block = function() return false end })
+        eq((st.r:resolve(ip)), "health-probe")
+        eq(st.queries, 0)
+    end)
+    test("resolver: concurrent misses look up once", function()
+        local st = make(nil)
+        st.r:resolve(ip); st.r:resolve(ip); st.r:resolve(ip)
+        eq(st.queries, 1); eq(#st.queued, 1)
+    end)
+    test("resolver: failed lookup keeps the lock so DNS is not hammered", function()
+        local st = make(nil)
+        st.r:resolve(ip); st.queued[1](false)
+        eq(st.dict.raw["inflight:" .. ip], true)
+        eq((st.r:resolve(ip)), "health-probe")
+        eq(#st.queued, 1)
     end)
     test("resolver: spawn failure releases lock", function()
-        local dict = fake_dict()
-        local r = sa.new_resolver{ dict = dict, dynamic_prefix = {10, 233},
-            resolver_lib = { TYPE_PTR = 12 }, spawn = function() return nil, "too many" end }
-        r:resolve(ip)
-        eq(dict.raw["inflight:" .. ip], nil)
+        local st = make(nil, { sync_timeout_ms = false, spawn = function() return nil, "too many" end })
+        st.r:resolve(ip)
+        eq(st.dict.raw["inflight:" .. ip], nil)
+    end)
+
+    test("resolver: sparse caller keeps its label (no expiry by age)", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        st.answer = nil
+        for _ = 1, 10 do
+            st.clock = st.clock + 90
+            eq((st.r:resolve(ip)), "orders")
+        end
+        eq(st.queries, 1)
+    end)
+    test("refresh: DNS error keeps the previous answer", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        st.answer = nil
+        st.r:refresh_all()
+        eq((st.r:resolve(ip)), "orders")
+        st.answer = { errcode = 2, errstr = "server failure" }
+        st.r:refresh_all()
+        eq((st.r:resolve(ip)), "orders")
+    end)
+    test("refresh: reassigned IP takes the new owner's name", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        st.answer = ptr(BILLING)
+        eq(st.r:refresh_all(), 1)
+        local svc, ns = st.r:resolve(ip)
+        eq(svc, "billing"); eq(ns, "pay")
+    end)
+    test("refresh: NXDOMAIN means nobody owns it -> defaults", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        st.answer = NXDOMAIN
+        st.r:refresh_all()
+        eq((st.r:resolve(ip)), "health-probe")
+    end)
+    test("refresh: IPs idle past forget_after are dropped", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        st.clock = st.clock + 3600
+        st.r:refresh_all()
+        eq(st.dict.raw[ip], nil)
+    end)
+    test("refresh: requests keep an IP alive", function()
+        local st = make(ptr(ORDERS))
+        st.r:resolve(ip)
+        for _ = 1, 70 do
+            st.clock = st.clock + 60
+            st.r:resolve(ip)
+        end
+        st.r:refresh_all()
+        eq((st.r:resolve(ip)), "orders")
+    end)
+    test("refresh: skips in-flight locks", function()
+        local st = make(nil)
+        st.r:resolve(ip)
+        local before = st.queries
+        st.r:refresh_all()
+        eq(st.queries, before)
+    end)
+    test("start: only the leader schedules, at refresh_interval", function()
+        local st = make(nil)
+        st.r:start()
+        eq(#st.timers, 1); eq(st.timers[1][1], 15)
+        local follower = make(nil, { is_leader = function() return false end })
+        follower.r:start()
+        eq(#follower.timers, 0)
     end)
 end
 

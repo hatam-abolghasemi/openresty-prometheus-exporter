@@ -175,7 +175,10 @@ function _M.init()
     -- ============================================================
     resolver = source_attribution.new_resolver{
         dict               = ngx.shared.ptr_cache,
-        cache_ttl          = cfg.ptr_cache_ttl,
+        refresh_interval   = cfg.ptr_refresh_interval or cfg.ptr_cache_ttl,
+        forget_after       = cfg.ptr_forget_after,
+        sync_timeout_ms    = cfg.ptr_sync_timeout,
+        ignore_services    = cfg.ptr_ignore_services,
         dns                = { nameservers = {{ cfg.ptr_dns_server, 53 }}, timeout_ms = cfg.ptr_dns_timeout },
         dynamic_prefix     = cfg.dynamic_prefix,
         static_ranges      = cfg.static_ranges,
@@ -183,6 +186,7 @@ function _M.init()
         default_namespace  = cfg.default_namespace,
         default_service    = cfg.probe_default_service,
     }
+    resolver:start()
 
     -- ============================================================
     -- Own identity -- see lib/self_identity.lua
