@@ -36,7 +36,7 @@ Pinned by digest, for production:
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:93b2fb7f12fdac5d73f584c4f43663b00bbf2c36a8606ed695affe74d63998ad  # 1.31.8.1-0-alma
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:cb30e5124a35ac52b2e6baf98dbec28bfa9dfad14e442c9bfb9d2e71cf038f02  # 1.31.8.1-0-alpine
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:eab52f8d39e9f7362b85b3b2ec446364349c532b7fa5fd7eef925ae46c400685  # 1.31.8.1-0-alpine-apk
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:3fc92a2371542141d29a295bd139e9b620e2220992c5e62428077dec1a55fd77  # 1.31.8.1-0-alpine-fat
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:0c47522ded3c94d4688d0f8c15fd8bcd0a8d289d3f2cb8b9eb99e45b7eda9096  # 1.31.8.1-0-alpine-fat
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:1e28904472d6c1eb3e4f328c6f2b0338a6ed1ac71dce68e9f4adbfb4a150ef57  # 1.31.8.1-0-alpine-slim
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:0444f0b5f8f22641ea108ad3849fb5609e5c8f6247c833d6c4b0dc40798e0cf4  # 1.31.8.1-0-bookworm
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:fe85b7f794d34d94a6d849d128b30031c91412d194cfb07367da9077147dcec4  # 1.31.8.1-0-bookworm-buildpack
