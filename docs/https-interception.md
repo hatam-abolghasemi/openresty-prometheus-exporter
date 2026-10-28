@@ -36,7 +36,11 @@ app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :312
    `http_metrics.record()` as everything else.
 4. It then re-originates to the real destination over a **verified** TLS
    connection (`proxy_ssl_verify on` against the system trust store) — so the
-   app's end-to-end TLS guarantee is preserved, not dropped.
+   app's end-to-end TLS guarantee is preserved, not dropped. Those connections
+   are kept alive and pooled **per hostname**
+   ([`intercept_origin`](modules.md#intercept_originlua)), so an intercepted
+   request costs no extra round trips to the destination once a connection to
+   it is warm.
 
 The whole machinery is **baked into the image**. A deployment enables it with
 one env var plus a mounted CA — no config file changes.
@@ -215,14 +219,16 @@ same discipline.
 
 - Only ports in `INTERCEPT_TLS_PORTS` (default `443`) are intercepted; every
   other TLS port falls through to outbound's `CONNECT host:port` view. To
-  intercept another port it must also be re-originated correctly — the baked
-  `:3129` re-originates on the destination's own port via `$host$request_uri`,
-  so standard HTTPS ports work; exotic setups may need a dedicated terminator.
+  intercept another port, add it there: `:3129` re-originates on the port the
+  app addressed (taken from its `Host` header, `443` when absent).
 - Bypassed hosts and non-intercepted ports always show the CONNECT-style line —
   that's intended, not a failure.
 - Minted leaf certs are cached per SNI in `ssl_shared_dict ssl_mint_cache`
   (`cert_ttl` seconds, default 1 day). One leaf key is shared across hosts (as
   mitmproxy does); see [`tls_intercept`](modules.md#tls_interceptlua).
+- Destinations are resolved with the cluster DNS from `/etc/resolv.conf` and
+  the answer is reused for `dns_cache_ttl` seconds (default 10). Pooled
+  connections idle out after `pool_idle_timeout` (default 60s).
 
 ---
 

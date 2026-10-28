@@ -5,6 +5,19 @@ Dated entries for this project's own code. The vendored library under
 
 ### 2026-10-28
 
+- **Intercepted HTTPS no longer reconnects to the destination per request.**
+  `:3129` re-originated with `proxy_pass https://$host…`, which keeps no
+  connection pool, so every decrypted request paid a new TCP + TLS handshake to
+  the real destination: about two round trips added to each call (+45 ms p50
+  against a destination 20 ms away). New `lib/intercept_origin.lua` resolves the
+  destination and pools connections per hostname; the `upstream
+  intercept_origin` block in `intercept.conf` sets `keepalive 0` so nginx's
+  implicit IP-keyed pool can't hand one host's verified connection to another.
+  New `intercept.*` keys: `dns_server`, `dns_timeout`, `dns_cache_ttl`,
+  `pool_idle_timeout`, `pool_max_requests`.
+- **Intercepted non-443 ports are re-originated on their own port.** `$host`
+  drops the port, so a port added to `INTERCEPT_TLS_PORTS` was re-sent to 443.
+  The port now comes from the `Host` header.
 - **Gauge expiry window raised from 10s to 15s** (`http.expiry_window`,
   `stream.expiry_window`, and the `gauge_expiry` default). With a 15s scrape
   interval and the 5s sweep, about 1 in 6 isolated writes to a quiet series

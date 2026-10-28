@@ -148,6 +148,13 @@ return {
         ca_key_path  = "/etc/nginx/intercept/ca.key",
         cert_ttl     = 86400,  -- seconds a minted leaf is valid and cached
         leaf_bits    = 2048,
+
+        -- re-origination to the real destination (lib/intercept_origin.lua)
+        dns_server        = own_nameserver,  -- from /etc/resolv.conf; set an explicit IP to override
+        dns_timeout       = 2000,   -- ms per DNS try (2 tries); runs on the request path, once per host per dns_cache_ttl
+        dns_cache_ttl     = 10,     -- seconds a resolved address is reused (was `resolver valid=10s`)
+        pool_idle_timeout = 60,     -- seconds an idle pooled connection to a destination is kept
+        pool_max_requests = 10000,  -- requests per pooled connection before it is recycled
     },
 
     stream = {

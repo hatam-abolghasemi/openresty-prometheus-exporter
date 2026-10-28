@@ -57,6 +57,7 @@ keep them true.
 | [`stream_metrics`](#stream_metricslua) | L4 pipeline orchestration | needs ngx | `init`, `connection_open`, `record`, `collect` |
 | [`intercept`](#interceptlua) | Per-CONNECT intercept decision | reads env/ngx | `should`, `upstream` |
 | [`tls_intercept`](#tls_interceptlua) | Per-SNI leaf-cert minting | needs ngx | `mint` |
+| [`intercept_origin`](#intercept_originlua) | Pooled re-origination to the real destination | needs ngx | `resolve`, `balance` |
 
 ---
 
@@ -83,7 +84,8 @@ Key groups (see inline comments in the file for the full set):
 - `http.discover_identity` / `app` / `namespace` — own-identity discovery and
   its fallback.
 - `http.histogram_buckets*` — bucket boundaries (seconds / bytes / counts).
-- `intercept.*` — CA cert/key paths, leaf cert TTL and key size.
+- `intercept.*` — CA cert/key paths, leaf cert TTL and key size; DNS server,
+  DNS cache lifetime and connection-pool limits for re-origination.
 - `stream.*` + `apps.stream.*` — the L4 counterparts.
 
 ---
@@ -318,6 +320,31 @@ buys nothing here); mints and caches a leaf per SNI in `ssl_mint_cache` for
 If the CA can't be read, fail the handshake loudly — don't silently fall back to
 the baked `fallback.crt`, which exists only so `nginx -t` and no-SNI
 handshakes don't crash.
+
+---
+
+## `intercept_origin.lua`
+
+**Why:** without a pool, `:3129` opened a fresh TCP + TLS connection to the
+destination for every decrypted request — two extra round trips each, even for
+apps that reuse their own connection. This module keeps those connections alive.
+
+**API**
+- `resolve()` — access phase on `:3129`. Takes host and port from the `Host`
+  header (port defaults to `443`), resolves the host against
+  `intercept.dns_server`, caches the answer per worker for `dns_cache_ttl`
+  seconds, and stores the target in `ngx.ctx`. Unresolvable → `502`.
+- `balance()` — `balancer_by_lua` of `upstream intercept_origin`. Sets the peer
+  with the **hostname as the pool key and TLS name**, enables keepalive
+  (`pool_idle_timeout`, `pool_max_requests`) and allows one retry, so a pooled
+  connection the destination closed while idle is replaced (nginx still never
+  retries a non-idempotent request that was already sent).
+
+**Invariant:** connections are pooled per hostname, never per IP. A connection
+verified for `api-a` must never carry a request for `api-b`, even on the same
+IP, or `api-b`'s certificate is never checked. That is why the upstream block
+sets `keepalive 0`: nginx >= 1.29 gives every `upstream{}` an implicit
+IP-keyed `keepalive 32` that would bypass the per-host pool. Don't remove it.
 
 ---
 

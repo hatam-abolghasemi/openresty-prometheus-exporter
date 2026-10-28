@@ -193,7 +193,8 @@ When `CONNECT host:port` isn't enough, the sidecar can decrypt outbound HTTPS:
 cert signed by a CA you mount (`lib/tls_intercept.lua`), records the decrypted
 request with the same `record()`, and re-originates to the real destination
 over **verified** TLS (`proxy_ssl_verify on` against
-`/etc/nginx/intercept/trusted-ca.crt`, the distro bundle). Because it only ever
+`/etc/nginx/intercept/trusted-ca.crt`, the distro bundle), on connections kept
+alive and pooled per hostname (`lib/intercept_origin.lua`). Because it only ever
 sees CONNECTs that reached `:3128`, it does nothing without outbound.
 
 Off unless `INTERCEPT_TLS=on` and a CA keypair is mounted at
