@@ -135,7 +135,7 @@ return {
         ptr_sync_timeout         = 100,   -- ms; a never-seen IP is resolved inline with this timeout (nil = always background)
         ptr_ignore_services      = { "%-metrics$", "%-headless$" },  -- Lua patterns; Services passed over when an IP has several PTR records
         probe_default_service    = "health-probe",  -- fallback for unresolved dynamic-range addresses (often kubelet probes)
-        probe_default_namespace  = "default",
+        probe_default_namespace  = "default",         -- namespace paired with probe_default_service
         waypoint_service_name    = "waypoint",  -- must match the Service name your mesh's waypoint Gateway creates
     },
 

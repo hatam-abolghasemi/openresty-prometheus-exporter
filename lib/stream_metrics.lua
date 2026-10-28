@@ -131,6 +131,7 @@ function _M.init()
                 default_label     = http_cfg.default_label,
                 default_namespace = http_cfg.default_namespace,
                 default_service   = http_cfg.probe_default_service,
+                default_service_namespace = http_cfg.probe_default_namespace,
             }
             resolver:start()
             if http_cfg.discover_identity then

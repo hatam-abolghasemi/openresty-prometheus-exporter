@@ -202,6 +202,9 @@ local TOUCH_EVERY = 60
 --   static_ranges / dynamic_prefix / default_label / default_namespace
 --                    = passed through to classify_static,
 --   default_service  = label for IPs nothing resolves,
+--   default_service_namespace
+--                    = namespace paired with default_service (falls back
+--                      to default_namespace),
 --   resolver_lib     = resty.dns.resolver or a test double,
 --   spawn            = function(delay, fn) -> ok; default ngx.timer.at,
 --   every            = function(interval, fn) -> ok; default ngx.timer.every,
@@ -226,7 +229,7 @@ function _M.new_resolver(opts)
     default_namespace = opts.default_namespace,
   }
   self.default_service = opts.default_service or "unknown-caller"
-  self.default_namespace = opts.default_namespace or "unknown"
+  self.default_namespace = opts.default_service_namespace or opts.default_namespace or "unknown"
   self.resolver_lib = opts.resolver_lib
   self.spawn = opts.spawn or function(delay, fn) return ngx.timer.at(delay, fn) end
   self.every = opts.every or function(interval, fn) return ngx.timer.every(interval, fn) end

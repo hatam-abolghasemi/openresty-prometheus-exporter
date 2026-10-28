@@ -5,6 +5,12 @@ Dated entries for this project's own code. The vendored library under
 
 ### 2026-10-28
 
+- **`probe_default_namespace` is now used.** The resolver paired
+  `probe_default_service` with `default_namespace` (the namespace for public
+  IPs), so unresolved pod-range callers showed as `unknown.health-probe`
+  instead of `default.health-probe`. New resolver option
+  `default_service_namespace` carries `probe_default_namespace`; public IPs
+  keep `default_namespace`.
 - **Intercepted HTTPS no longer reconnects to the destination per request.**
   `:3129` re-originated with `proxy_pass https://$host…`, which keeps no
   connection pool, so every decrypted request paid a new TCP + TLS handshake to

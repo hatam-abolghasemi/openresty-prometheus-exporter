@@ -185,6 +185,7 @@ function _M.init()
         default_label      = cfg.default_label,
         default_namespace  = cfg.default_namespace,
         default_service    = cfg.probe_default_service,
+        default_service_namespace = cfg.probe_default_namespace,
     }
     resolver:start()
 

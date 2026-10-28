@@ -196,6 +196,15 @@ do
         eq(svc, "app-metrics"); eq(ns, "shop")
     end)
 
+    test("resolver: probe fallback namespace is separate from public-IP namespace", function()
+        local st = make(ptr(ORDERS), { sync_timeout_ms = false,
+            default_namespace = "unknown", default_service_namespace = "default" })
+        local svc, ns = st.r:resolve(ip)
+        eq(svc, "health-probe"); eq(ns, "default")
+        svc, ns = st.r:resolve("8.8.8.8")
+        eq(svc, "public"); eq(ns, "unknown")
+    end)
+
     test("resolver: miss without sync returns defaults and queues one lookup", function()
         local st = make(ptr(ORDERS), { sync_timeout_ms = false })
         local svc, ns = st.r:resolve(ip)
