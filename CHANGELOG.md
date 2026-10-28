@@ -3,6 +3,15 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-10-28
+
+- **Gauge expiry window raised from 10s to 15s** (`http.expiry_window`,
+  `stream.expiry_window`, and the `gauge_expiry` default). With a 15s scrape
+  interval and the 5s sweep, about 1 in 6 isolated writes to a quiet series
+  was zeroed before any scrape saw it. At 15s every write is scraped at least
+  once, and about 1 in 6 is scraped twice. Keep `expiry_window` equal to the
+  scrape interval.
+
 ### 2026-10-27
 
 - **Caller identity no longer expires.** The PTR cache dropped every answer

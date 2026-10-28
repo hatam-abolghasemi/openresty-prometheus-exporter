@@ -70,7 +70,7 @@ return {
         discover_identity                    = true,           -- own Service name via PTR, resolved once, then fixed
         app                                  = "unknown",      -- reported only until the PTR lookup first succeeds
         namespace                            = own_namespace,  -- read once from the SA file, see top of file
-        expiry_window                        = 10,
+        expiry_window                        = 15,     -- seconds a gauge keeps its last value without updates; set it to the Prometheus scrape interval
         expiry_scan_limit                    = 10000,  -- bounds get_keys(); unbounded scans block all workers under high cardinality
         cluster_ip_prefix                    = "10.233.",  -- must end in "."; verify per-cluster
 
@@ -151,7 +151,7 @@ return {
     },
 
     stream = {
-        expiry_window     = 10,
+        expiry_window     = 15,     -- same rule as http.expiry_window
         expiry_scan_limit = 10000,
 
         metric_connections_total           = true,

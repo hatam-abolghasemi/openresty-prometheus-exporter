@@ -145,6 +145,15 @@ gauges (`nginx_connection_requests`, `nginx_connection_time_seconds`), and
 (`upstream_connect_time`, `session_duration`). Same module, three call
 sites, each with its own shared dict.
 
+Set `expiry_window` to the Prometheus scrape interval (15s here). A value
+written just after a scrape must survive until the next one, and with the
+5-second sweep a gauge is zeroed 0-5s after its window. Below the scrape
+interval, a write to a quiet series can be zeroed before any scrape sees it;
+above it, the same value is reported by more scrapes. At exactly the scrape
+interval every write is scraped, and about 1 in 6 is scraped twice. This is
+the mirror image of `ptr_refresh_interval`, which must stay at or below the
+scrape interval.
+
 If cardinality grows a lot, raise `expiry_scan_limit` so the 5-second sweep
 still completes one full pass — but treat that as a symptom, not a fix; the
 sanitization modules above are what should be keeping cardinality bounded

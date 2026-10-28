@@ -14,7 +14,7 @@
 --
 -- Usage (inside init_worker_by_lua_block):
 --   local gauge_expiry = require("gauge_expiry")
---   local expiry = gauge_expiry.new{ dict = ngx.shared.custom_metrics, window = 10, scan_limit = 10000 }
+--   local expiry = gauge_expiry.new{ dict = ngx.shared.custom_metrics, window = 15, scan_limit = 10000 }
 --   expiry:start(5, function(scope, labels)
 --     if scope == "req" then
 --       metric_latency:set(0, labels)
@@ -34,7 +34,7 @@ function _M.new(opts)
   assert(opts and opts.dict, "gauge_expiry.new requires opts.dict")
   local self = setmetatable({}, _M)
   self.dict = opts.dict
-  self.window = opts.window or 10
+  self.window = opts.window or 15
   self.scan_limit = opts.scan_limit or 1000
   return self
 end
