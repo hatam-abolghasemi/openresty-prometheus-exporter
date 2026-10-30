@@ -31,11 +31,20 @@ _M.defaults = {
 local UUID_PATTERN =
   "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
 
+-- Merged option tables, memoised per caller opts table (weak keys). Callers
+-- pass the same config table on every request, so this merges once instead
+-- of allocating a fresh table per path segment on the hot path. Treat an
+-- opts table as immutable once passed in.
+local merged_cache = setmetatable({}, { __mode = "k" })
+
 local function merge_opts(opts)
   if not opts then return _M.defaults end
-  local merged = {}
+  local merged = merged_cache[opts]
+  if merged then return merged end
+  merged = {}
   for k, v in pairs(_M.defaults) do merged[k] = v end
   for k, v in pairs(opts) do merged[k] = v end
+  merged_cache[opts] = merged
   return merged
 end
 
@@ -74,9 +83,10 @@ function _M.sanitize(path, opts)
   -- strip any query string defensively, collapse duplicate slashes
   path = path:match("^[^?]*"):gsub("//+", "/")
 
+  local cfg = merge_opts(opts)
   local segments = {}
   for seg in path:gmatch("[^/]+") do
-    if _M.is_param_segment(seg, opts) then
+    if _M.is_param_segment(seg, cfg) then
       if segments[#segments] ~= "$param" then
         table.insert(segments, "$param")
       end

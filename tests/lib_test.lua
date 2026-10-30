@@ -32,6 +32,15 @@ test("route: uuid + nested", function()
 end)
 test("route: keeps real words", function() eq(route_sanitizer.sanitize("/orders/new"), "/orders/new") end)
 test("route: strips query, collapses slashes", function() eq(route_sanitizer.sanitize("//a//b?x=1"), "/a/b") end)
+test("route: memoised opts stay per-table", function()
+    local uuid = "/u/550e8400-e29b-41d4-a716-446655440000"
+    local off, on = { uuid = false, long_with_digit = false, hex = false, slug_suffix_digit = false }, { uuid = true }
+    for _ = 1, 2 do  -- second pass hits the cache
+        eq(route_sanitizer.sanitize(uuid, off), uuid)
+        eq(route_sanitizer.sanitize(uuid, on), "/u/$param")
+        eq(route_sanitizer.sanitize(uuid), "/u/$param")
+    end
+end)
 test("route: adjacent params collapse", function() eq(route_sanitizer.sanitize("/1/2/3"), "/$param") end)
 test("route: nil is root", function() eq(route_sanitizer.sanitize(nil), "/") end)
 test("route: check can be turned off", function()
@@ -315,6 +324,54 @@ do
         follower.r:start()
         eq(#follower.timers, 0)
     end)
+end
+
+-- caller_identity: builds the resolver from metrics_config.http, starts it,
+-- and only builds/starts self_identity when discover_identity is on.
+do
+    local saved = rawget(_G, "ngx")
+    local timers = {}
+    _G.ngx = {
+        worker = { id = function() return 0 end },
+        timer  = {
+            every = function(i) timers[#timers + 1] = { "every", i }; return true end,
+            at    = function(d) timers[#timers + 1] = { "at", d };    return true end,
+        },
+        now = function() return 0 end, log = function() end,
+    }
+    local caller_identity = require("caller_identity")
+    local cfg = {
+        ptr_refresh_interval = 30, ptr_forget_after = 120, ptr_sync_timeout = 50,
+        ptr_dns_server = "10.0.0.10", ptr_dns_timeout = 500,
+        dynamic_prefix = {10, 233}, default_label = "public", default_namespace = "unknown",
+        probe_default_service = "health-probe", probe_default_namespace = "default",
+        app = "fallback-app", namespace = "fallback-ns",
+    }
+    local dict = {}
+
+    test("caller_identity: resolver from config, started", function()
+        timers = {}
+        cfg.discover_identity = false
+        local r, ident = caller_identity.build(cfg, dict)
+        eq(ident, nil)
+        eq(r.dict, dict); eq(r.refresh_interval, 30); eq(r.forget_after, 120)
+        eq(r.sync_timeout_ms, 50); eq(r.dns.nameservers[1][1], "10.0.0.10")
+        eq(r.default_service, "health-probe"); eq(r.default_namespace, "default")
+        eq(#timers, 1); eq(timers[1][1], "every"); eq(timers[1][2], 30)
+    end)
+
+    test("caller_identity: own identity with fallback + on_change, started", function()
+        timers = {}
+        cfg.discover_identity = true
+        local cb = function() end
+        local r, ident = caller_identity.build(cfg, dict, { on_change = cb })
+        eq(ident.resolver, r); eq(ident.on_change, cb)
+        local svc, ns = ident:get()
+        eq(svc, "fallback-app"); eq(ns, "fallback-ns")
+        eq(#timers, 2); eq(timers[2][1], "at")
+    end)
+
+    _G.ngx = saved
 end
 
 print(("%d passed, %d failed"):format(passed, failed))
