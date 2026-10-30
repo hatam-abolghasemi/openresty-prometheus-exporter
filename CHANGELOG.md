@@ -3,6 +3,31 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-10-30
+
+- **Fewer shared-dict writes per request.** The vendored library writes every
+  gauge `set()` straight to the shared dict under its lock (counters and
+  histograms are batched per worker). `record()` wrote the four
+  `nginx_http_connections` states on every request; they're a server-wide
+  snapshot, so `collect()` now sets all four once per scrape (it previously
+  skipped `active`). 4 of the ~11 locked writes per request are gone.
+- **Expired gauges are deleted, not zeroed.** `gauge_expiry`'s callbacks in
+  `http_metrics` and `stream_metrics` now `del()` a quiet series instead of
+  `set(0)`, so it drops out of `/metrics` and the dict instead of lingering as
+  `0` forever. Panels that relied on seeing `0` for idle series now get no data.
+  The sweeper runs on worker 0 only (the dict is shared; `get_keys()` locks it).
+- **`route_sanitizer` no longer allocates per path segment.** The merged options
+  table is memoised per caller opts table instead of rebuilt for every segment
+  of every request.
+- **Access log is buffered** (`buffer=64k flush=1s`): one write per batch
+  instead of a `write()` syscall per request; lines can appear up to 1s late.
+- **`APP_PORT` read once per worker.** The inbound balancer moved to
+  `lib/app_peer.lua`, which reads it at load instead of per request.
+- **One resolver/identity builder for HTTP and stream.** `stream_metrics.init()`
+  repeated `http_metrics.init()`'s resolver and own-identity setup line for
+  line. Both now call `lib/caller_identity.lua`'s `build()`. No behavior
+  change: same config keys, same defaults, each subsystem keeps its own dict.
+
 ### 2026-10-28
 
 - **`probe_default_namespace` is now used.** The resolver paired

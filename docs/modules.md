@@ -1,6 +1,6 @@
 # Modules — maintainer's guide
 
-The observability lives in [`lib/`](../lib/): twelve small Lua modules built on
+The observability lives in [`lib/`](../lib/): fourteen small Lua modules built on
 the vendored `prometheus` library's public API. This page is the **maintainer's
 reference** — what each module is, why it's shaped that way, its public
 functions, the invariants you must not break, and how to change, extend, and
@@ -49,15 +49,17 @@ keep them true.
 | [`route_sanitizer`](#route_sanitizerlua) | Collapse ID-like path segments | ✅ | `sanitize`, `is_param_segment` |
 | [`host_classifier`](#host_classifierlua) | Bucket the `Host` header | ✅ | `classify` |
 | [`client_subnet`](#client_subnetlua) | Mask client IP to a subnet | ✅ | `mask` |
-| [`gauge_expiry`](#gauge_expirylua) | Zero gauges that go stale | ✅ | `new`, `touch`, `sweep`, `start` |
+| [`gauge_expiry`](#gauge_expirylua) | Delete gauge series that go stale | ✅ | `new`, `touch`, `sweep`, `start` |
 | [`app_toggle`](#app_togglelua) | Per-leg metrics on/off | ✅ | `enabled` |
 | [`source_attribution`](#source_attributionlua) | Who called us (static/PTR/mesh) | mostly | `new_resolver`, `classify_static`, `apply_waypoint_override`, `parse_ptr`, `parse_xfcc` |
 | [`self_identity`](#self_identitylua) | Who am I (own service/ns via PTR) | needs ngx | `new`, `get`, `is_resolved`, `start` |
+| [`caller_identity`](#caller_identitylua) | Build + start resolver and own identity from config | needs ngx | `build` |
 | [`http_metrics`](#http_metricslua) | HTTP pipeline orchestration | needs ngx | `init`, `classify_source`, `record`, `collect` |
 | [`stream_metrics`](#stream_metricslua) | L4 pipeline orchestration | needs ngx | `init`, `connection_open`, `record`, `collect` |
 | [`intercept`](#interceptlua) | Per-CONNECT intercept decision | reads env/ngx | `should`, `upstream` |
 | [`tls_intercept`](#tls_interceptlua) | Per-SNI leaf-cert minting | needs ngx | `mint` |
 | [`intercept_origin`](#intercept_originlua) | Pooled re-origination to the real destination | needs ngx | `resolve`, `balance` |
+| `app_peer` | Inbound balancer to `127.0.0.1:$APP_PORT` | needs ngx | `balance` |
 
 ---
 
@@ -148,14 +150,16 @@ specifically want subnet-level grouping.
 
 **Why:** Prometheus gauges don't self-expire. A gauge set once for a rarely-hit
 route keeps reporting that stale value forever, which is actively misleading.
-This zeroes gauges whose label-set hasn't been touched within a window.
+This deletes gauge series whose label-set hasn't been touched within a window,
+so a quiet series drops out of `/metrics` instead of lingering (stale or as 0).
 
 **API**
 - `new{dict=, window=, scan_limit=} → tracker`
 - `tracker:touch(scope, label_values[, now])` — call on every gauge write.
 - `tracker:sweep(now, on_expire)` — one pass; usually you don't call this
   directly.
-- `tracker:start(interval, on_expire)` — timer that sweeps every `interval`s.
+- `tracker:start(interval, on_expire)` — timer that sweeps every `interval`s;
+  runs on worker 0 only (the tracking dict is shared).
 
 **Design:** one module, three call sites (request-level gauges, connection-level
 gauges, stream gauges), **each with its own shared dict**. `scope` keeps those
@@ -232,6 +236,22 @@ fallback→discovered change, `on_change` deletes the `nginx_http_connections`
 series recorded under the fallback (they'd otherwise freeze); counter history is
 kept. A pod that never resolves (no PTR, `hostNetwork`, no Service) just keeps
 the fallback. On by default via `http.discover_identity`.
+
+---
+
+## `caller_identity.lua`
+
+**Why:** `http_metrics` and `stream_metrics` both need a caller resolver and
+(optionally) own-identity discovery, built from the same `metrics_config.http`
+keys. One builder means the two subsystems can't drift in how they read those
+keys.
+
+**API:** `build(cfg, dict[, {on_change=}]) → resolver, ident` -- `cfg` is
+`metrics_config.http`, `dict` the subsystem's own PTR shared dict
+(`ptr_cache` / `stream_ptr_cache`; HTTP and stream can't share one). Both
+objects come back started; `ident` is `nil` when `discover_identity` is off.
+`on_change` is passed to `self_identity` (HTTP uses it to delete
+`nginx_http_connections` series filed under the fallback identity).
 
 ---
 

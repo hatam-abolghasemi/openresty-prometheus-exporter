@@ -13,13 +13,15 @@ counter/gauge/histogram API — is vendored **unmodified** from
 entirely upstream's. Everything below is this project's own work on top of that
 library:
 
-- **`lib/`** — twelve small Lua modules. Six are pure logic with no
+- **`lib/`** — fourteen small Lua modules. Six are pure logic with no
   environment-specific values (`route_sanitizer`, `host_classifier`,
   `client_subnet`, `gauge_expiry`, `source_attribution`, `app_toggle`),
   tested without a running nginx worker (`tests/`). `http_metrics.lua` and
-  `stream_metrics.lua` wire all of that into the `prometheus` API;
+  `stream_metrics.lua` wire all of that into the `prometheus` API
+  (sharing one resolver/identity builder, `caller_identity.lua`);
   `self_identity.lua`, `intercept.lua` and `tls_intercept.lua` cover own
-  identity and https interception. `metrics_config.lua` is plain data — the
+  identity and https interception; `app_peer.lua` points the inbound
+  leg at the app container. `metrics_config.lua` is plain data — the
   one file here you're meant to edit per deployment.
 - **`docker/`** — the image: `nginx.conf`, `conf.d/default.conf` (the inbound
   and outbound servers, `/metrics`), `conf.d/intercept.conf` (https
@@ -138,7 +140,8 @@ Prometheus gauges don't self-expire — a gauge set once and never touched
 again reports that value forever, which is actively misleading for a
 low-traffic route. **`gauge_expiry.lua`** pairs every gauge write with a
 timestamp in a shared dict; a 5-second timer sweeps for label combinations
-untouched for `expiry_window` seconds and zeroes their gauges. It's used for
+untouched for `expiry_window` seconds and deletes those gauge series (one
+sweeper, on worker 0). It's used for
 request-level gauges (latency, request/response size), connection-level
 gauges (`nginx_connection_requests`, `nginx_connection_time_seconds`), and
 — on the stream side — the two "last observed value" gauges
@@ -147,8 +150,8 @@ sites, each with its own shared dict.
 
 Set `expiry_window` to the Prometheus scrape interval (15s here). A value
 written just after a scrape must survive until the next one, and with the
-5-second sweep a gauge is zeroed 0-5s after its window. Below the scrape
-interval, a write to a quiet series can be zeroed before any scrape sees it;
+5-second sweep a gauge is deleted 0-5s after its window. Below the scrape
+interval, a write to a quiet series can be deleted before any scrape sees it;
 above it, the same value is reported by more scrapes. At exactly the scrape
 interval every write is scraped, and about 1 in 6 is scraped twice. This is
 the mirror image of `ptr_refresh_interval`, which must stay at or below the
