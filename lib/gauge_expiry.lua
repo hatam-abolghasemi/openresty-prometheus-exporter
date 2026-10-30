@@ -17,10 +17,10 @@
 --   local expiry = gauge_expiry.new{ dict = ngx.shared.custom_metrics, window = 15, scan_limit = 10000 }
 --   expiry:start(5, function(scope, labels)
 --     if scope == "req" then
---       metric_latency:set(0, labels)
---       metric_request_size:set(0, labels)
+--       metric_latency:del(labels)
+--       metric_request_size:del(labels)
 --     elseif scope == "conn" then
---       metric_connection_requests:set(0, labels)
+--       metric_connection_requests:del(labels)
 --     end
 --   end)
 --
@@ -49,7 +49,7 @@ end
 function _M.decode_key(key)
   local parts = {}
   -- "([^|]*)|" (not "[^|]+") so empty label values survive the round trip;
-  -- dropping them shifts the label count and breaks set(0, labels) on expiry.
+  -- dropping them shifts the label count and breaks del(labels) on expiry.
   for part in (key .. "|"):gmatch("([^|]*)|") do
     table.insert(parts, part)
   end
@@ -72,7 +72,7 @@ end
 
 -- Scans up to `scan_limit` tracked keys. For each whose last touch is older
 -- than `window` seconds relative to `now`, calls on_expire(scope, labels)
--- and then removes the tracking key. Returns the number of keys expired.
+-- (which should delete the gauge series) and then removes the tracking key. Returns the number of keys expired.
 function _M:sweep(now, on_expire)
   now = now or (ngx and ngx.now())
   assert(now, "gauge_expiry:sweep requires `now` outside of an ngx worker")
@@ -95,7 +95,10 @@ end
 -- Starts a recurring ngx.timer.at loop calling sweep() every `interval`
 -- seconds, forwarding expirations to on_expire(scope, labels). Must be
 -- called from within an nginx worker (e.g. init_worker_by_lua_block).
+-- Only worker 0 sweeps: the tracking dict is shared, so one sweeper covers
+-- every worker, and get_keys() locks the whole dict while it runs.
 function _M:start(interval, on_expire)
+  if ngx.worker.id() ~= 0 then return end
   local self_ref = self
   local function tick(premature)
     if premature then return end

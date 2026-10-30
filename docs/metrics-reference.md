@@ -53,7 +53,7 @@ status don't apply.
 
 | Metric | Type | Labels | Notes |
 |---|---|---|---|
-| `nginx_http_connections` | gauge | `state` (`active`/`reading`/`writing`/`waiting`), `app`, `namespace` | From stub_status |
+| `nginx_http_connections` | gauge | `state` (`active`/`reading`/`writing`/`waiting`), `app`, `namespace` | From stub_status, sampled at scrape time |
 | `nginx_connection_requests` | gauge | `app`, `namespace` | Requests on the current connection |
 | `nginx_connection_requests_histogram` | histogram | `app`, `namespace` | off by default |
 | `nginx_connection_time_seconds` | gauge | `app`, `namespace` | Current connection age |

@@ -222,6 +222,7 @@ jobs:
           echo "$metrics" | grep -E '^nginx_http_requests_total'
           echo "$metrics" | grep -q 'mode="0"'
           echo "$metrics" | grep -q 'method="CONNECT".*mode="1"'
+          echo "$metrics" | grep -q '^nginx_http_connections{state="active"'
           echo "$metrics" | grep -qx 'nginx_metric_errors_total 0'
 
       - name: Smoke test https interception

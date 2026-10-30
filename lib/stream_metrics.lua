@@ -23,8 +23,7 @@
 
 local gauge_expiry       = require("gauge_expiry")
 local app_toggle         = require("app_toggle")
-local self_identity      = require("self_identity")
-local source_attribution = require("source_attribution")
+local caller_identity    = require("caller_identity")
 
 local config   = require("metrics_config")
 local cfg      = config.stream
@@ -119,29 +118,8 @@ function _M.init()
                     "stream_ptr_cache` is not declared in stream.conf -- source labels disabled")
         else
             source_on = true
-            resolver = source_attribution.new_resolver{
-                dict              = dict,
-                refresh_interval  = http_cfg.ptr_refresh_interval or http_cfg.ptr_cache_ttl,
-                forget_after      = http_cfg.ptr_forget_after,
-                sync_timeout_ms   = http_cfg.ptr_sync_timeout,
-                ignore_services   = http_cfg.ptr_ignore_services,
-                dns               = { nameservers = {{ http_cfg.ptr_dns_server, 53 }}, timeout_ms = http_cfg.ptr_dns_timeout },
-                dynamic_prefix    = http_cfg.dynamic_prefix,
-                static_ranges     = http_cfg.static_ranges,
-                default_label     = http_cfg.default_label,
-                default_namespace = http_cfg.default_namespace,
-                default_service   = http_cfg.probe_default_service,
-                default_service_namespace = http_cfg.probe_default_namespace,
-            }
-            resolver:start()
-            if http_cfg.discover_identity then
-                ident = self_identity.new{
-                    resolver           = resolver,
-                    fallback_service   = http_cfg.app,
-                    fallback_namespace = http_cfg.namespace,
-                }
-                ident:start()
-            end
+            -- same settings as HTTP, its own dict (stream can't see http's)
+            resolver, ident = caller_identity.build(http_cfg, dict)
         end
     end
 
@@ -214,10 +192,10 @@ function _M.init()
         }
         expiry:start(5, function(_, labels)
             if metric_stream_upstream_connect_time_gauge then
-                metric_stream_upstream_connect_time_gauge:set(0, labels)
+                metric_stream_upstream_connect_time_gauge:del(labels)
             end
             if metric_stream_session_duration_gauge then
-                metric_stream_session_duration_gauge:set(0, labels)
+                metric_stream_session_duration_gauge:del(labels)
             end
         end)
     end

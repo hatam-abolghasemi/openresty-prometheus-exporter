@@ -18,7 +18,7 @@ local client_subnet      = require("client_subnet")
 local gauge_expiry       = require("gauge_expiry")
 local source_attribution = require("source_attribution")
 local app_toggle         = require("app_toggle")
-local self_identity      = require("self_identity")
+local caller_identity    = require("caller_identity")
 
 local config = require("metrics_config")
 local cfg    = config.http
@@ -158,57 +158,34 @@ function _M.init()
             window     = cfg.expiry_window,
             scan_limit = cfg.expiry_scan_limit,
         }
+        -- Expired series are deleted, not zeroed: a zeroed series would stay
+        -- in the dict (and /metrics) forever, so cardinality could only grow.
         expiry:start(5, function(scope, labels)
             if scope == "req" then
-                if metric_latency       then metric_latency:set(0, labels)       end
-                if metric_request_size  then metric_request_size:set(0, labels)  end
-                if metric_response_size then metric_response_size:set(0, labels) end
+                if metric_latency       then metric_latency:del(labels)       end
+                if metric_request_size  then metric_request_size:del(labels)  end
+                if metric_response_size then metric_response_size:del(labels) end
             elseif scope == "conn" then
-                if metric_connection_requests then metric_connection_requests:set(0, labels) end
-                if metric_connection_time     then metric_connection_time:set(0, labels)     end
+                if metric_connection_requests then metric_connection_requests:del(labels) end
+                if metric_connection_time     then metric_connection_time:del(labels)     end
             end
         end)
     end
 
     -- ============================================================
-    -- Caller-identification resolver -- see lib/source_attribution.lua
+    -- Caller identification + own identity -- see lib/caller_identity.lua
     -- ============================================================
-    resolver = source_attribution.new_resolver{
-        dict               = ngx.shared.ptr_cache,
-        refresh_interval   = cfg.ptr_refresh_interval or cfg.ptr_cache_ttl,
-        forget_after       = cfg.ptr_forget_after,
-        sync_timeout_ms    = cfg.ptr_sync_timeout,
-        ignore_services    = cfg.ptr_ignore_services,
-        dns                = { nameservers = {{ cfg.ptr_dns_server, 53 }}, timeout_ms = cfg.ptr_dns_timeout },
-        dynamic_prefix     = cfg.dynamic_prefix,
-        static_ranges      = cfg.static_ranges,
-        default_label      = cfg.default_label,
-        default_namespace  = cfg.default_namespace,
-        default_service    = cfg.probe_default_service,
-        default_service_namespace = cfg.probe_default_namespace,
-    }
-    resolver:start()
-
-    -- ============================================================
-    -- Own identity -- see lib/self_identity.lua
-    -- ============================================================
-    if cfg.discover_identity then
-        ident = self_identity.new{
-            resolver           = resolver,
-            fallback_service   = cfg.app,
-            fallback_namespace = cfg.namespace,
-            -- nginx_http_connections is only ever set, never expired, so its
-            -- series under the fallback identity would freeze forever once
-            -- the real identity is found -- delete them.
-            on_change = function(old_svc, old_ns)
-                if not metric_connections then return end
-                for _, state in ipairs({"active", "reading", "writing", "waiting"}) do
-                    metric_connections:del({state, old_svc, old_ns})
-                end
-            end,
-        }
-        ident:start()
-    end
+    resolver, ident = caller_identity.build(cfg, ngx.shared.ptr_cache, {
+        -- nginx_http_connections is only ever set, never expired, so its
+        -- series under the fallback identity would freeze forever once
+        -- the real identity is found -- delete them.
+        on_change = function(old_svc, old_ns)
+            if not metric_connections then return end
+            for _, state in ipairs({"active", "reading", "writing", "waiting"}) do
+                metric_connections:del({state, old_svc, old_ns})
+            end
+        end,
+    })
 end
 
 -- ============================================================
@@ -301,21 +278,19 @@ function _M.record()
         expiry:touch("conn", conn_labels)
     end
 
-    if metric_connections then
-        metric_connections:set(ngx.var.connections_active  or 0, {"active",  app, namespace})
-        metric_connections:set(ngx.var.connections_reading or 0, {"reading", app, namespace})
-        metric_connections:set(ngx.var.connections_writing or 0, {"writing", app, namespace})
-        metric_connections:set(ngx.var.connections_waiting or 0, {"waiting", app, namespace})
-    end
+    -- nginx_http_connections is not set here: it's a server-wide snapshot, so
+    -- collect() sets it once per scrape instead of 4 locked shared-dict writes
+    -- per request.
 end
 
 -- content_by_lua_block of `location = /metrics` on :9145
 function _M.collect()
     if metric_connections then
         local app, namespace = own()
-        metric_connections:set(ngx.var.connections_reading, {"reading", app, namespace})
-        metric_connections:set(ngx.var.connections_waiting, {"waiting", app, namespace})
-        metric_connections:set(ngx.var.connections_writing, {"writing", app, namespace})
+        metric_connections:set(ngx.var.connections_active  or 0, {"active",  app, namespace})
+        metric_connections:set(ngx.var.connections_reading or 0, {"reading", app, namespace})
+        metric_connections:set(ngx.var.connections_writing or 0, {"writing", app, namespace})
+        metric_connections:set(ngx.var.connections_waiting or 0, {"waiting", app, namespace})
     end
     prometheus:collect()
 end
