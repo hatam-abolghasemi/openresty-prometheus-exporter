@@ -251,11 +251,32 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test METRICS_CONFIG
+        if: steps.smoke-build.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke-envcfg-app busybox \
+            sh -c 'mkdir -p /www && echo app-ok > /www/index.html && httpd -f -p 8080 -h /www'
+          docker run -d --name smoke-envcfg --network container:smoke-envcfg-app \
+            -e METRICS_CONFIG='http.metric_latency_hist=false;http.metric_latency_histogram=false' \
+            openresty-prometheus:smoke
+          probe() { docker run --rm --network container:smoke-envcfg-app curlimages/curl -sS --retry 10 --retry-connrefused --retry-delay 1 -m 15 "$@"; }
+
+          [ "$(probe http://127.0.0.1/)" = "app-ok" ]
+          metrics=$(probe http://127.0.0.1:9145/metrics)
+          echo "$metrics" | grep -q '^nginx_http_request_duration_seconds{'
+          if echo "$metrics" | grep -q '^nginx_http_request_duration_seconds_histogram'; then
+            echo "::error::METRICS_CONFIG did not turn the latency histogram off"
+            exit 1
+          fi
+          echo "$metrics" | grep -qx 'nginx_metric_errors_total 0'
+          docker logs smoke-envcfg 2>&1 | grep -q 'METRICS_CONFIG: skipped "http.metric_latency_histogram": unknown setting'
+
       - name: Smoke test logs
         if: always() && steps.smoke-build.outputs.run == 'true'
         run: |
           fatal=0
-          for c in smoke-nginx smoke-intercept; do
+          for c in smoke-nginx smoke-intercept smoke-envcfg; do
             docker logs "$c" > /dev/null 2>&1 || continue
             echo "::group::$c"
             docker logs "$c" 2>&1 | tail -n 100
