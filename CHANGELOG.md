@@ -3,6 +3,21 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-11-02
+
+- **`METRICS_CONFIG`: override simple settings from an env var.** A Deployment
+  can now flip a switch without mounting a full copy of `metrics_config.lua`:
+  `METRICS_CONFIG="http.metric_latency_hist=false;http.expiry_window=30"`.
+  Entries are `path=value`, separated by `;` or newlines, applied on top of
+  whichever `metrics_config.lua` is loaded (baked or mounted). Only existing
+  boolean/number/string settings can be set, plus
+  `apps.stream.<destination>.metrics_enabled` for any destination; the value
+  must parse as the setting's type. An unknown path (e.g. a typo), a wrong type
+  or a table setting is logged at `error` and skipped; it never stops nginx.
+  New `lib/config_env.lua`; `http_metrics`, `stream_metrics`, `tls_intercept`
+  and `intercept_origin` now read config through it. The image declares
+  `env METRICS_CONFIG;` in `main.d/metrics-config-env.conf`. No default changed.
+
 ### 2026-10-30
 
 - **Fewer shared-dict writes per request.** The vendored library writes every

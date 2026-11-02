@@ -143,8 +143,20 @@ XFCC override — it's a spoofing vector if XFCC can reach the sidecar unverifie
 
 ## Tuning
 
-Everything is in [`lib/metrics_config.lua`](modules.md#metrics_configlua); mount
-your own copy over the baked one to change it without rebuilding. Common knobs:
+Everything is in [`lib/metrics_config.lua`](modules.md#metrics_configlua). To
+change a simple value (a switch, a number, a name), set `METRICS_CONFIG` on the
+nginx container; nothing to mount:
+
+```yaml
+env:
+  - name: METRICS_CONFIG
+    value: "http.metric_latency_hist=false;http.label_host=false"
+```
+
+Unknown settings are logged at `error` and skipped. For tables (buckets,
+`static_ranges`, the whole `sanitize` set), mount your own copy of the file
+over the baked one. Rules: [`config_env`](modules.md#config_envlua). Common
+knobs:
 
 | Want to… | Change |
 |---|---|
@@ -152,7 +164,9 @@ your own copy over the baked one to change it without rebuilding. Common knobs:
 | Turn a metric off | `metric_requests`, `metric_latency`, `metric_latency_hist`, … |
 | Fix caller resolution | `static_ranges`, `cluster_ip_prefix`, `ptr_dns_server` |
 | Tune route collapsing | the `sanitize` table — see [`route_sanitizer`](modules.md#route_sanitizerlua) |
-| Change histogram buckets | `histogram_buckets` (seconds), `histogram_buckets_*` |
+| Change histogram buckets | `histogram_buckets` (seconds), `histogram_buckets_*` (file only) |
+
+In `METRICS_CONFIG` these are `http.<key>`, e.g. `http.metric_latency_hist=false`.
 
 > **One shared config, many Deployments.** With `discover_identity = true`
 > (default) each pod discovers its own service/namespace via PTR, so the same

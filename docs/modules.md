@@ -46,6 +46,7 @@ keep them true.
 | Module | Role | Pure? | Public API |
 |---|---|---|---|
 | [`metrics_config`](#metrics_configlua) | All site-specific data | data | *(table)* |
+| [`config_env`](#config_envlua) | `METRICS_CONFIG` env overrides on top of `metrics_config` | ✅ (`load` reads env) | `parse`, `apply`, `load` |
 | [`route_sanitizer`](#route_sanitizerlua) | Collapse ID-like path segments | ✅ | `sanitize`, `is_param_segment` |
 | [`host_classifier`](#host_classifierlua) | Bucket the `Host` header | ✅ | `classify` |
 | [`client_subnet`](#client_subnetlua) | Mask client IP to a subnet | ✅ | `mask` |
@@ -89,6 +90,56 @@ Key groups (see inline comments in the file for the full set):
 - `intercept.*` — CA cert/key paths, leaf cert TTL and key size; DNS server,
   DNS cache lifetime and connection-pool limits for re-origination.
 - `stream.*` + `apps.stream.*` — the L4 counterparts.
+
+For a one-off change to a simple value, set `METRICS_CONFIG` instead of
+mounting a copy of this file — see [`config_env`](#config_envlua).
+
+---
+
+## `config_env.lua`
+
+**Why:** most Deployments only need to flip one or two switches, and mounting a
+full copy of `metrics_config.lua` for that means the copy must be kept in step
+with the image's on every upgrade. One env var names only what changes.
+
+```yaml
+env:
+  - name: METRICS_CONFIG
+    value: "http.metric_latency_hist=false;http.expiry_window=30"
+```
+
+Entries are `path=value`, separated by `;` or newlines (so a YAML `|` block
+with one entry per line works too); the path is the dotted location in the
+config table. Applied on top of whichever `metrics_config.lua` is loaded, so a
+mounted file and the env var combine, and the env var wins.
+
+Rules:
+
+- The path must name a setting that already exists and holds a boolean,
+  number or string, and the value must parse as that type: `true`/`false`, a
+  number, a non-empty string. The one setting that may be new is
+  `apps.stream.<destination>.metrics_enabled`, because adding an entry is how
+  a destination is switched off.
+- Tables (`histogram_buckets*`, `static_ranges`, `dynamic_prefix`,
+  `ptr_ignore_services`, `sanitize` as a whole) can't be set; individual
+  `sanitize.*` flags can. A setting can't be set to `nil` either. Use a mounted
+  `metrics_config.lua` for those.
+- Values can't contain `;` or a newline.
+- A bad entry (unknown path, e.g. a typo; wrong type; malformed) is logged at
+  `error` level once per worker, naming the entry, and skipped. The other
+  entries still apply. It never stops nginx, since the sidecar also carries
+  the app's traffic.
+
+**Wiring:** `http_metrics`, `stream_metrics`, `tls_intercept` and
+`intercept_origin` call `require("config_env").load()` instead of
+`require("metrics_config")`. It applies the env var once per Lua VM and returns
+the same table `require("metrics_config")` does. nginx only passes the variable
+to workers if it's declared at the main level; the image does that in
+`main.d/metrics-config-env.conf` (`env METRICS_CONFIG;`). Off-image, add that
+line yourself.
+
+**Invariant:** `parse` and `apply` stay pure (no `ngx.*`) and never raise on
+bad input; only `load` touches the environment and the log.
 
 ---
 
@@ -370,7 +421,8 @@ IP-keyed `keepalive 32` that would bypass the per-host pool. Don't remove it.
 
 ## Adding a metric
 
-1. Add a `metric_<name>` flag to `metrics_config.http` (or `.stream`).
+1. Add a `metric_<name>` flag to `metrics_config.http` (or `.stream`). It is
+   settable from `METRICS_CONFIG` automatically.
 2. In the module's `init()`, create the metric object guarded by that flag,
    with the shared label schema.
 3. In `record()`, write it guarded by the same flag.

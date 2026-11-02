@@ -282,7 +282,8 @@ to start is made in a build stage, so no flavor needs openssl.
 
 Inside the image:
 
-- `/opt/prometheus/` holds `prometheus*.lua` and `lib/`; mount your own
+- `/opt/prometheus/` holds `prometheus*.lua` and `lib/`; set
+  `METRICS_CONFIG` to override simple values, or mount your own
   `lib/metrics_config.lua` over the baked one.
 - `/etc/nginx/nginx.conf` and `/etc/nginx/conf.d/default.conf` are a
   transparent default: inbound on `:80` reverse-proxies to

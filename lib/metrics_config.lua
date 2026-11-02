@@ -8,9 +8,13 @@
 -- values in it. Being plain data (a table, no logic), it's also a natural
 -- fit for shipping via its own ConfigMap if you want config changes to not
 -- require rebuilding the nginx image -- see examples/openresty-sidecar/.
+-- For a simple value (a switch, a number, a name) there's no need to copy the
+-- file at all: set METRICS_CONFIG on the container instead, e.g.
+-- METRICS_CONFIG="http.metric_latency_hist=false" (lib/config_env.lua).
 --
 -- Consumed by lib/http_metrics.lua (the `http` and `apps` tables) and
--- lib/stream_metrics.lua (the `stream` and `apps.stream` tables).
+-- lib/stream_metrics.lua (the `stream` and `apps.stream` tables), both via
+-- lib/config_env.lua, which applies METRICS_CONFIG on top.
 --
 -- Replace every example value below (app/namespace names, IP ranges,
 -- resolver IP, static_ranges zone map) with your own before deploying.

@@ -111,8 +111,9 @@ Everything works, but you own the plumbing the image otherwise handles:
   `env INTERCEPT_TLS …` declarations so workers can read them), and a
   `fallback.crt`/`fallback.key`. For https interception off-image you must reproduce those
   yourself.
-- **Env-var switches** — `INTERCEPT_TLS` et al. only reach Lua if declared with
-  `env` at the main level (that's what `main.d/intercept-env.conf` does).
+- **Env-var switches** — `INTERCEPT_TLS` et al. and `METRICS_CONFIG` only reach
+  Lua if declared with `env` at the main level (that's what
+  `main.d/intercept-env.conf` and `main.d/metrics-config-env.conf` do).
 - **System trust store** — https interception re-originates with verification
   against `/etc/nginx/intercept/trusted-ca.crt`, which the image links to the
   distro's CA bundle; off-image, point `proxy_ssl_trusted_certificate` in

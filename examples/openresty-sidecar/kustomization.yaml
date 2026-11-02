@@ -17,8 +17,10 @@ configMapGenerator:
     files:
       - stream-enable.conf
       - stream.conf
-  # To tune metrics/labels: copy lib/metrics_config.lua next to this file,
-  # edit it, uncomment below and the matching mount in deployment.yaml.
+  # To flip a switch or change a number, set METRICS_CONFIG in deployment.yaml
+  # instead. For tables (buckets, static_ranges): copy lib/metrics_config.lua
+  # next to this file, edit it, uncomment below and the matching mount in
+  # deployment.yaml.
   # - name: sidecar-metrics-config
   #   files:
   #     - metrics_config.lua
