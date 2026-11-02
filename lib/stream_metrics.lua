@@ -25,7 +25,7 @@ local gauge_expiry       = require("gauge_expiry")
 local app_toggle         = require("app_toggle")
 local caller_identity    = require("caller_identity")
 
-local config   = require("metrics_config")
+local config   = require("config_env").load()
 local cfg      = config.stream
 local http_cfg = config.http     -- own identity + caller-attribution settings are shared with HTTP
 local apps     = config.apps.stream

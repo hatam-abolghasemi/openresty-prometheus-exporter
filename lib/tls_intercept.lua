@@ -26,7 +26,7 @@ local name    = require("resty.openssl.x509.name")
 local altname = require("resty.openssl.x509.altname")
 local bn      = require("resty.openssl.bn")
 
-local ok_cfg, config = pcall(require, "metrics_config")
+local ok_cfg, config = pcall(function() return require("config_env").load() end)
 local ic = (ok_cfg and config and config.intercept) or {}
 
 local CA_CERT_PATH = ic.ca_cert_path or "/etc/nginx/intercept/ca.crt"

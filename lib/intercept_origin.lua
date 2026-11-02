@@ -28,7 +28,7 @@ local resolver = require("resty.dns.resolver")
 local balancer = require("ngx.balancer")
 local lrucache = require("resty.lrucache")
 
-local ok_cfg, config = pcall(require, "metrics_config")
+local ok_cfg, config = pcall(function() return require("config_env").load() end)
 local ic = (ok_cfg and config and config.intercept) or {}
 
 local DNS_SERVER        = ic.dns_server or "127.0.0.1"

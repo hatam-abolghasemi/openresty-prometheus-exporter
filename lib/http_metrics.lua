@@ -20,7 +20,7 @@ local source_attribution = require("source_attribution")
 local app_toggle         = require("app_toggle")
 local caller_identity    = require("caller_identity")
 
-local config = require("metrics_config")
+local config = require("config_env").load()
 local cfg    = config.http
 local apps   = config.apps
 

@@ -374,5 +374,128 @@ do
     _G.ngx = saved
 end
 
+-- config_env: METRICS_CONFIG overrides on top of metrics_config.lua
+do
+    local config_env = require("config_env")
+    local function fresh() return dofile("./lib/metrics_config.lua") end
+    local function snapshot(t, prefix, out)
+        out = out or {}
+        for k, v in pairs(t) do
+            local p = (prefix and prefix .. "." or "") .. tostring(k)
+            if type(v) == "table" then snapshot(v, p, out) else out[p] = v end
+        end
+        return out
+    end
+    local function changed(before, cfg)
+        local after, diff = snapshot(cfg), {}
+        for k, v in pairs(after) do if before[k] ~= v then diff[#diff + 1] = k end end
+        for k in pairs(before) do if after[k] == nil then diff[#diff + 1] = k end end
+        table.sort(diff)
+        return table.concat(diff, ",")
+    end
+
+    test("config_env: unset or blank changes nothing", function()
+        for _, s in ipairs({ false, "", "  ", ";;\n" }) do
+            local cfg = fresh()
+            local before = snapshot(cfg)
+            local _, errs = config_env.apply(cfg, s or nil)
+            eq(#errs, 0); eq(changed(before, cfg), "")
+        end
+    end)
+    test("config_env: boolean switch, only that key changes", function()
+        local cfg = fresh()
+        local before = snapshot(cfg)
+        local _, errs = config_env.apply(cfg, "http.metric_latency_hist=false")
+        eq(#errs, 0); eq(cfg.http.metric_latency_hist, false)
+        eq(changed(before, cfg), "http.metric_latency_hist")
+        config_env.apply(cfg, "http.metric_latency_hist=true")
+        eq(cfg.http.metric_latency_hist, true)
+    end)
+    test("config_env: numbers, strings, nested, separators, last wins", function()
+        local cfg = fresh()
+        local _, errs = config_env.apply(cfg,
+            " http.expiry_window = 30 ;stream.expiry_window=45\n" ..
+            "http.sanitize.min_len=6\r\nhttp.app=a=b\nintercept.cert_ttl=3600;http.expiry_window=60")
+        eq(#errs, 0)
+        eq(cfg.http.expiry_window, 60); eq(type(cfg.http.expiry_window), "number")
+        eq(cfg.stream.expiry_window, 45); eq(cfg.http.sanitize.min_len, 6)
+        eq(cfg.http.app, "a=b"); eq(cfg.intercept.cert_ttl, 3600)
+    end)
+    test("config_env: unknown key is reported, the rest still applies", function()
+        local cfg = fresh()
+        local logged = {}
+        local _, errs = config_env.apply(cfg,
+            "http.metric_latency_histogram=false;http.metric_requests=false",
+            function(m) logged[#logged + 1] = m end)
+        eq(#errs, 1); eq(#logged, 1)
+        assert(logged[1]:find("METRICS_CONFIG", 1, true) and logged[1]:find("http.metric_latency_histogram", 1, true))
+        eq(cfg.http.metric_latency_histogram, nil)
+        eq(cfg.http.metric_latency_hist, true)
+        eq(cfg.http.metric_requests, false)
+    end)
+    test("config_env: wrong type, tables and malformed entries leave config untouched", function()
+        local bad = {
+            "http.metric_latency_hist=no", "http.metric_latency_hist=0", "http.metric_latency_hist=",
+            "http.expiry_window=abc", "http.expiry_window=", "http.expiry_window=1e999", "http.expiry_window=nan",
+            "http.app=", "http.histogram_buckets=1,2", "http.histogram_buckets.1=5", "http.sanitize=false",
+            "http=false", "nosuch.key=1", "http.=1", "http..app=x", ".http.app=x", "justtext", "=x",
+            "apps.stream.metrics_enabled=false", "apps.stream.redis.metrics_enabled=off",
+            "apps.inbound.metrics_enabled=false",
+        }
+        for _, s in ipairs(bad) do
+            local cfg = fresh()
+            local before = snapshot(cfg)
+            local _, errs = config_env.apply(cfg, s)
+            if #errs ~= 1 then error(("%q: expected 1 error, got %d"):format(s, #errs)) end
+            if changed(before, cfg) ~= "" then error(("%q changed %s"):format(s, changed(before, cfg))) end
+        end
+    end)
+    test("config_env: per-leg toggles", function()
+        local cfg = fresh()
+        local _, errs = config_env.apply(cfg,
+            "apps.outbound.metrics_enabled=false;apps.stream.redis.metrics_enabled=false;" ..
+            "apps.stream.postgres-main.metrics_enabled=false;apps.stream.mysql.metrics_enabled=true")
+        eq(#errs, 0)
+        eq(app_toggle.enabled(cfg.apps, "outbound"), false)
+        eq(app_toggle.enabled(cfg.apps.stream, "redis"), false)
+        eq(app_toggle.enabled(cfg.apps.stream, "postgres-main"), false)
+        eq(app_toggle.enabled(cfg.apps.stream, "mysql"), true)
+        eq(app_toggle.enabled(cfg.apps.stream, "other"), true)
+    end)
+    test("config_env: new stream destination with a bad value adds no entry", function()
+        local cfg = fresh()
+        config_env.apply(cfg, "apps.stream.pg.metrics_enabled=nope")
+        eq(cfg.apps.stream.pg, nil)
+    end)
+    test("config_env: load() applies the env var once to metrics_config", function()
+        local saved_getenv = os.getenv
+        local saved_cfg, saved_env = package.loaded["metrics_config"], package.loaded["config_env"]
+        package.loaded["metrics_config"], package.loaded["config_env"] = nil, nil
+        local reads = 0
+        os.getenv = function(name)
+            if name == "METRICS_CONFIG" then reads = reads + 1; return "http.metric_latency_hist=false;bad.key=1" end
+            return saved_getenv(name)
+        end
+        local saved_stderr = io.stderr
+        local errout = {}
+        io.stderr = { write = function(_, ...) errout[#errout + 1] = table.concat({ ... }) end }
+        local ok, err = pcall(function()
+            local ce = require("config_env")
+            local cfg = ce.load()
+            eq(cfg, require("metrics_config"))
+            eq(cfg.http.metric_latency_hist, false)
+            eq(ce.load(), cfg); eq(reads, 1)
+            assert(table.concat(errout):find("bad.key", 1, true))
+        end)
+        io.stderr = saved_stderr
+        os.getenv = saved_getenv
+        package.loaded["metrics_config"], package.loaded["config_env"] = saved_cfg, saved_env
+        if not ok then error(err, 0) end
+    end)
+    test("config_env: defaults untouched without the env var", function()
+        eq(require("config_env").load().http.metric_latency_hist, true)
+    end)
+end
+
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)
