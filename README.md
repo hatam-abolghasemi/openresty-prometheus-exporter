@@ -3,7 +3,7 @@
 [![Tests](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/tests.yml/badge.svg)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/tests.yml)
 [![Image](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/openresty-image.yml/badge.svg)](docs/images.md)
 [![Release](https://img.shields.io/github/v/release/hatam-abolghasemi/openresty-prometheus-exporter)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/releases)
-[![License: MIT](https://img.shields.io/github/license/hatam-abolghasemi/openresty-prometheus-exporter)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/hatam-abolghasemi/openresty-prometheus-exporter?style=flat)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/stargazers)
 
 **The metrics you'd expect nginx to expose on `/metrics` — but it doesn't.**
