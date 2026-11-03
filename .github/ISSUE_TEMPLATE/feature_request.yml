@@ -1,0 +1,32 @@
+name: Feature request
+description: A metric, label, dashboard panel or capability you need.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can't you see or do today? What question would this help you answer?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: The metric, label, panel or behavior you have in mind. If it adds a label, roughly how many distinct values would it have?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you use today instead
+      description: Access-log parsing, a mesh, OpenTelemetry, a workaround…
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to implement this myself (see CONTRIBUTING.md)

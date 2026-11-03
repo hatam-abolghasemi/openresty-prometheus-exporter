@@ -1,0 +1,81 @@
+name: Bug report
+description: Something doesn't work, a metric is wrong or missing, or the app behaves differently behind the sidecar.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through [private reporting](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/security/advisories/new), not here.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you saw instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Feature
+      multiple: true
+      options:
+        - inbound
+        - outbound
+        - https interception
+        - stream (L4)
+        - caller identity (source_service / source_namespace)
+        - route sanitization
+        - Grafana dashboard
+        - image / build
+        - running on my own nginx (no image)
+    validations:
+      required: true
+
+  - type: input
+    id: image
+    attributes:
+      label: Image
+      description: Full tag or digest, e.g. `ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.8.1-0-alpine`. On your own nginx, the commit you copied `lib/` from.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where it runs
+      options:
+        - Kubernetes (sidecar)
+        - Kubernetes (other)
+        - Docker / Compose
+        - VM or bare metal
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Env vars (`APP_PORT`, `INTERCEPT_TLS`, `METRICS_CONFIG`…), any mounted `metrics_config.lua` changes, `stream.conf`. Redact secrets.
+      render: shell
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Relevant /metrics lines
+      description: "`curl -s localhost:9145/metrics | grep <metric>` (or `:9254` for stream). Include `nginx_metric_errors_total`."
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: nginx error log
+      description: "`kubectl logs <pod> -c <sidecar>` or `docker logs <container>`"
+      render: text
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Ideally on top of `examples/quickstart/`.

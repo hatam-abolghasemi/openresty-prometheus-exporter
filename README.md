@@ -104,6 +104,7 @@ and L4 streams, one tab each.
 - **[Modules](docs/modules.md)** — maintainer's guide: what each `lib/` module does, why, how to change it
 - **[Architecture & internals](ARCHITECTURE.md)** — the design narrative
 - **[Changelog](CHANGELOG.md)**
+- **[Contributing](CONTRIBUTING.md)**: questions go to [Discussions](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/discussions), security reports to [SECURITY.md](SECURITY.md)
 
 ## Images & versioning
 

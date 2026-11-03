@@ -1,0 +1,35 @@
+name: Route not sanitized
+description: An ID, hash or token leaks into the `route` label and grows cardinality.
+labels: ["sanitizer"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The sanitizer collapses IDs to `$param`. When a new ID shape slips through, `route` cardinality climbs. Real paths are fine, but **replace anything sensitive** (tokens, emails, customer IDs) with a same-shaped fake.
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example paths and what /metrics shows
+      description: A few raw request paths, and the `route` value you see for each.
+      placeholder: |
+        /api/orders/ord_9f3kd02  ->  route="/api/orders/ord_9f3kd02"
+        /api/orders/ord_1x8zq77  ->  route="/api/orders/ord_1x8zq77"
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: Expected route
+      placeholder: /api/orders/$param
+    validations:
+      required: true
+
+  - type: textarea
+    id: sanitize
+    attributes:
+      label: Sanitizer overrides
+      description: Any `sanitize` options you set in `metrics_config.lua` or `METRICS_CONFIG`.
+      render: lua
