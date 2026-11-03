@@ -3,6 +3,26 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-11-03
+
+- **Quickstart on plain Docker.** New `examples/quickstart/`: `docker compose up`
+  brings up a demo app with the exporter as its sidecar, generated inbound and
+  outbound traffic, Prometheus, and Grafana with the dashboard provisioned. The
+  README gains a dashboard screenshot, a "Try it in a minute" section and status badges. No code or
+  image change.
+- **Dashboard covers every metric.** New tabs: *HTTPS interception* (visible vs
+  opaque outbound, a ranked table of tunnelled `host:port`s) and *Exporter
+  health* (`nginx_metric_errors_total`, series per pod, route/host/caller
+  cardinality). New panels: inbound by caller and outbound by destination host
+  (Request breakdown); request/response size percentiles (Payload sizes) and
+  connection histograms (Connections), both off-by-default metrics; stream
+  throughput on both legs, time to first byte and open sessions per destination
+  (L4 streams). Method, mode and destination cells are colour-coded.
+- **Fix: L4 connect-time p50/p95/p99** for status classes 1xx/3xx/4xx/5xx queried
+  `nginx_stream_session_duration_seconds_bucket`, which doesn't exist; they now
+  use `nginx_stream_upstream_connect_time_seconds_histogram_bucket` like the 2xx
+  series.
+
 ### 2026-11-02
 
 - **`METRICS_CONFIG`: override simple settings from an env var.** A Deployment
