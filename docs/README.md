@@ -2,8 +2,9 @@
 
 Step-by-step guides for each feature, a maintainer's reference for the
 modules, and the metrics catalog. New here? Start with the
-[project README](../README.md); come here when you're ready to turn a specific
-feature on or understand the internals.
+[project README](../README.md), or run the [quickstart](../examples/quickstart/)
+to see every feature working on plain Docker in a minute; come here when you're
+ready to turn a specific feature on or understand the internals.
 
 ## Features and how they depend on each other
 

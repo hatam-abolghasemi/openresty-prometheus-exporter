@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: openresty-prometheus-exporter
+    type: file
+    folder: ""
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

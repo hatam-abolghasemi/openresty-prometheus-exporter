@@ -1,0 +1,90 @@
+# Quickstart: the exporter as a sidecar beside a demo app, with generated
+# traffic, Prometheus and Grafana (dashboard pre-loaded). No Kubernetes needed.
+#
+#   docker compose up -d
+#
+#   app through the sidecar   http://localhost:8000
+#   exporter metrics          http://localhost:9145/metrics
+#   Prometheus                http://localhost:9090
+#   Grafana (no login)        http://localhost:3000
+#
+#   docker compose down        # stop and remove everything
+#
+# The sidecar shares the app's network namespace (network_mode: service:app),
+# exactly like two containers in one Kubernetes pod: it listens on :80 and
+# forwards to the app on 127.0.0.1:8080, and the app's egress goes through the
+# sidecar's forward proxy on 127.0.0.1:3128.
+#
+# Caller identity (source_service / source_namespace) needs Kubernetes reverse
+# DNS, so those labels stay at their fallbacks here. Everything else is real.
+
+name: openresty-exporter-quickstart
+
+services:
+  # The "app": go-httpbin, listening on 8080 (the sidecar's default APP_PORT).
+  # Ports are published here because the sidecar lives in this namespace.
+  app:
+    image: mccutchen/go-httpbin:latest
+    ports:
+      - "8000:80"      # inbound, through the sidecar
+      - "9145:9145"    # the exporter's /metrics
+
+  sidecar:
+    image: ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:latest
+    network_mode: service:app
+    environment:
+      APP_PORT: "8080"
+    depends_on:
+      - app
+
+  # A dependency the app calls, so outbound metrics have something to show.
+  upstream:
+    image: mccutchen/go-httpbin:latest
+
+  # Traffic INTO the app, from another container, through the sidecar's :80.
+  traffic-inbound:
+    image: curlimages/curl:latest
+    entrypoint: ["sh", "/traffic/inbound.sh"]
+    volumes:
+      - ./traffic:/traffic:ro
+    depends_on:
+      - sidecar
+
+  # Traffic OUT of the app: runs inside the app's network namespace and uses
+  # the sidecar's forward proxy, the way the app itself would with HTTP_PROXY.
+  traffic-outbound:
+    image: curlimages/curl:latest
+    network_mode: service:app
+    entrypoint: ["sh", "/traffic/outbound.sh"]
+    volumes:
+      - ./traffic:/traffic:ro
+    depends_on:
+      - sidecar
+      - upstream
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  # Grafana 13+ is needed for the v2 (tabbed) dashboard schema.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../grafana/openresty-prometheus-exporter.json:/var/lib/grafana/dashboards/openresty-prometheus-exporter.json:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

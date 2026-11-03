@@ -1,5 +1,11 @@
 # openresty-prometheus-exporter
 
+[![Tests](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/tests.yml/badge.svg)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/tests.yml)
+[![Image](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/actions/workflows/openresty-image.yml/badge.svg)](docs/images.md)
+[![Release](https://img.shields.io/github/v/release/hatam-abolghasemi/openresty-prometheus-exporter)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/releases)
+[![License: MIT](https://img.shields.io/github/license/hatam-abolghasemi/openresty-prometheus-exporter)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/hatam-abolghasemi/openresty-prometheus-exporter?style=flat)](https://github.com/hatam-abolghasemi/openresty-prometheus-exporter/stargazers)
+
 **The metrics you'd expect nginx to expose on `/metrics` — but it doesn't.**
 Inbound and outbound L7 with sanitized routes and real status codes, decrypted
 HTTPS details, L4 (TCP/UDP) from the app's own point of view, and caller
@@ -14,6 +20,33 @@ set of OpenResty Lua modules, exposed on a Prometheus endpoint.
 > The easiest path is the prebuilt image. Caller identity (`source_service` /
 > `source_namespace`) resolves on **Kubernetes**; under plain Docker everything
 > else works, you just don't get those two labels.
+
+![Grafana dashboard: inbound and outbound requests per second, 5xx ratio and latency, and a table of sanitized routes with status, latency and the calling namespace/service](docs/assets/dashboard-summary.png)
+
+<sub>The bundled [Grafana dashboard](grafana/) on a real workload: inbound (`in`)
+and outbound (`out`) side by side, IDs collapsed to `$param`, and the caller's
+namespace and service on every row.</sub>
+
+## Try it in a minute
+
+No Kubernetes needed. This brings up a demo app with the exporter as its
+sidecar, generated traffic, Prometheus, and Grafana with the dashboard loaded:
+
+```bash
+git clone https://github.com/hatam-abolghasemi/openresty-prometheus-exporter.git
+cd openresty-prometheus-exporter/examples/quickstart
+docker compose up -d
+```
+
+Open <http://localhost:3000> for the dashboard, or look at the raw series:
+
+```bash
+curl -s localhost:9145/metrics | grep '^nginx_http_requests_total' | head -20
+```
+
+Watch `/anything/orders/1`, `/anything/orders/2`, … arrive as a single
+`route="/anything/orders/$param"` with the real `status` kept. More in the
+[quickstart guide](examples/quickstart/).
 
 ---
 

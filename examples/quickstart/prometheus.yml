@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # The sidecar shares the app container's network, so it is scraped at app:9145.
+  # The dashboard is scoped by a `namespace` label; in Kubernetes the
+  # ServiceMonitor adds it (with `pod`). Here we set both by hand.
+  - job_name: openresty-prometheus-exporter
+    static_configs:
+      - targets: ["app:9145"]
+        labels:
+          namespace: quickstart
+          pod: app
