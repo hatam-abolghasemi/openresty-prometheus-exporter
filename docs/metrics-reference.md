@@ -58,6 +58,7 @@ status don't apply.
 | `nginx_connection_requests_histogram` | histogram | `app`, `namespace` | off by default |
 | `nginx_connection_time_seconds` | gauge | `app`, `namespace` | Current connection age |
 | `nginx_connection_time_seconds_histogram` | histogram | `app`, `namespace` | off by default |
+| `nginx_connection_slots_limit` | gauge | `app`, `namespace` | `worker_connections` × worker processes: the ceiling for slots in use (accepted connections + the upstream leg of in-flight requests). From `http.worker_connections`, else read from `nginx.conf` at startup; not exported if unknown. See [`connection_slots`](modules.md#connection_slotslua) |
 
 ## Health / internal
 

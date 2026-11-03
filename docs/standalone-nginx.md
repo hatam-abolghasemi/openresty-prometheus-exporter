@@ -75,6 +75,12 @@ log_by_lua_block    { require("http_metrics").record() }
 location = /metrics { content_by_lua_block { require("http_metrics").collect() } }
 ```
 
+`nginx_connection_slots_limit` reads `worker_connections` from
+`/etc/nginx/nginx.conf`. If your main config lives elsewhere (e.g.
+`/usr/local/openresty/nginx/conf/nginx.conf`) or sets it in an included file,
+set `http.nginx_conf_path` or `http.worker_connections` in `metrics_config.lua`;
+otherwise that one metric is simply not exported.
+
 The image's [`docker/conf.d/default.conf`](../docker/conf.d/default.conf) is a
 complete, working reference for all of this (reverse proxy + forward proxy +
 exposition). The

@@ -5,6 +5,19 @@ Dated entries for this project's own code. The vendored library under
 
 ### 2026-11-03
 
+- **New metric: `nginx_connection_slots_limit{app, namespace}`.** The
+  connection-slot ceiling, `worker_connections` × worker processes, so slots in
+  use can be read as a share of the limit. The dashboard's Connections tab
+  already queried it, but the exporter never emitted it, so "Slot limit per pod"
+  read 0 and the utilization panels stayed empty. `worker_connections` comes
+  from the new `http.worker_connections` setting when > 0 (also via
+  `METRICS_CONFIG`), otherwise from the directive in `http.nginx_conf_path`
+  (default `/etc/nginx/nginx.conf`, the image's config), read once per worker at
+  startup. If neither works, the metric isn't exported and worker 0 logs one
+  warning; nothing is guessed. New `lib/connection_slots.lua`; on by default
+  (`http.metric_connection_slots_limit`), one series per pod. In the image it
+  reads 4096. The image smoke test asserts it, and the override through
+  `METRICS_CONFIG`.
 - **Quickstart on plain Docker.** New `examples/quickstart/`: `docker compose up`
   brings up a demo app with the exporter as its sidecar, generated inbound and
   outbound traffic, Prometheus, and Grafana with the dashboard provisioned. The

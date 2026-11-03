@@ -90,6 +90,9 @@ return {
         metric_connection_requests_histogram = false,
         metric_connection_time               = true,
         metric_connection_time_histogram     = false,
+        metric_connection_slots_limit        = true,   -- nginx_connection_slots_limit, see lib/connection_slots.lua
+        worker_connections                   = 0,      -- for the slots limit; 0 = read it from nginx_conf_path
+        nginx_conf_path                      = "/etc/nginx/nginx.conf",
 
         histogram_buckets                    = {0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2.5, 5, 10},
         histogram_buckets_req_size           = {64, 256, 1024, 4096, 16384, 65536, 262144, 1048576},

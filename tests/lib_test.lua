@@ -120,6 +120,37 @@ test("identity: pod ip from /etc/hosts", function()
     eq(self_identity.pod_ip_from_hosts(hosts, "other"), nil)
 end)
 
+local slots = require("connection_slots")
+test("slots: parse worker_connections", function()
+    eq(slots.parse_worker_connections("events {\n    worker_connections  4096;\n}\n"), 4096)
+    eq(slots.parse_worker_connections("events { # worker_connections 1;\n  worker_connections 512 ;\n}"), 512)
+    eq(slots.parse_worker_connections("# worker_connections 1024;\nevents {}\n"), nil)
+    eq(slots.parse_worker_connections("events {}\n"), nil)
+    eq(slots.parse_worker_connections(nil), nil)
+end)
+test("slots: limit from config, nginx.conf, or nothing", function()
+    local conf = "worker_processes 2;\nevents {\n    worker_connections 4096;\n}\n"
+    local reads = 0
+    local reader = function(path) reads = reads + 1; if path == "/n.conf" then return conf end end
+    -- explicit setting wins and skips the file
+    local limit, src = slots.limit({ worker_connections = 1000, nginx_conf_path = "/n.conf" }, 2, reader)
+    eq(limit, 2000); eq(src, "config"); eq(reads, 0)
+    -- 0 = read nginx.conf
+    limit, src = slots.limit({ worker_connections = 0, nginx_conf_path = "/n.conf" }, 2, reader)
+    eq(limit, 8192); eq(src, "nginx.conf")
+    -- unreadable file, missing directive, bad worker count: unknown, never a guess
+    eq(slots.limit({ worker_connections = 0, nginx_conf_path = "/missing" }, 2, reader), nil)
+    eq(slots.limit({ worker_connections = 0, nginx_conf_path = "/n.conf" }, 2, function() return "events {}" end), nil)
+    eq(slots.limit({ worker_connections = 0, nginx_conf_path = "" }, 2, reader), nil)
+    eq(slots.limit({ worker_connections = 1000 }, 0, reader), nil)
+    eq(slots.limit({ worker_connections = 1000 }, nil, reader), nil)
+end)
+test("slots: the image's nginx.conf parses", function()
+    local f = assert(io.open("docker/nginx.conf", "r"))
+    local content = f:read("*a"); f:close()
+    eq(slots.parse_worker_connections(content), 4096)
+end)
+
 -- Schema and values must line up name-for-name with every label on, not just
 -- in count (a count-only match files values under the wrong label names).
 local cfg = require("metrics_config").http

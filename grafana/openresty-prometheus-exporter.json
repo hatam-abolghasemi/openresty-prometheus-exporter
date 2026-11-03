@@ -9742,7 +9742,7 @@
               ]
             }
           },
-          "description": "Highest connection-slot limit among the selected pods: nginx_connection_slots_limit (worker_connections × workers), exported by the Lua exporter.",
+          "description": "Highest connection-slot limit among the selected pods: nginx_connection_slots_limit = worker_connections × worker processes. Read from nginx.conf at startup, or set with METRICS_CONFIG=\"http.worker_connections=N\". No data means the exporter couldn't determine it (see the sidecar's log).",
           "id": 192,
           "links": [],
           "title": "Slot limit per pod",
@@ -9758,7 +9758,7 @@
                     "mode": "fixed"
                   },
                   "decimals": 0,
-                  "noValue": "0",
+                  "noValue": "No data",
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
@@ -9845,7 +9845,7 @@
                     "mode": "thresholds"
                   },
                   "decimals": 2,
-                  "noValue": "0",
+                  "noValue": "No data",
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
@@ -10578,7 +10578,7 @@
                   ],
                   "max": 1,
                   "min": 0,
-                  "noValue": "0",
+                  "noValue": "No data",
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [

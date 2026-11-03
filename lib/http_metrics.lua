@@ -19,6 +19,7 @@ local gauge_expiry       = require("gauge_expiry")
 local source_attribution = require("source_attribution")
 local app_toggle         = require("app_toggle")
 local caller_identity    = require("caller_identity")
+local connection_slots   = require("connection_slots")
 
 local config = require("config_env").load()
 local cfg    = config.http
@@ -34,6 +35,7 @@ local metric_response_size, metric_response_size_histogram
 local metric_connections
 local metric_connection_requests, metric_connection_requests_histogram
 local metric_connection_time, metric_connection_time_histogram
+local metric_connection_slots_limit, connection_slots_limit
 local expiry
 local resolver
 local ident   -- this pod's own service/namespace, see own() below
@@ -146,6 +148,22 @@ function _M.init()
             "nginx_connection_time_seconds_histogram", "Distribution of connection lifetimes in seconds",
             conn_label_schema, cfg.histogram_buckets_conn_time)
     end
+    if cfg.metric_connection_slots_limit then
+        -- Fixed for the life of the worker: worker_connections x workers.
+        -- Unknown (no setting, unreadable/unparsable nginx.conf) means the
+        -- metric isn't registered at all, so nothing fake is exported.
+        local limit, source = connection_slots.limit(cfg, ngx.worker.count())
+        if limit then
+            connection_slots_limit = limit
+            metric_connection_slots_limit = prometheus:gauge(
+                "nginx_connection_slots_limit",
+                "Connection slots available: worker_connections x worker processes",
+                conn_label_schema)
+        elseif ngx.worker.id() == 0 then
+            ngx.log(ngx.WARN, "nginx_connection_slots_limit not exported: ", source,
+                    "; set http.worker_connections in metrics_config.lua or METRICS_CONFIG")
+        end
+    end
 
     -- ============================================================
     -- Gauge expiry -- one tracker shared by both the "req" and "conn"
@@ -176,10 +194,14 @@ function _M.init()
     -- Caller identification + own identity -- see lib/caller_identity.lua
     -- ============================================================
     resolver, ident = caller_identity.build(cfg, ngx.shared.ptr_cache, {
-        -- nginx_http_connections is only ever set, never expired, so its
-        -- series under the fallback identity would freeze forever once
-        -- the real identity is found -- delete them.
+        -- nginx_http_connections and nginx_connection_slots_limit are only
+        -- ever set, never expired, so their series under the fallback
+        -- identity would freeze forever once the real identity is found --
+        -- delete them.
         on_change = function(old_svc, old_ns)
+            if metric_connection_slots_limit then
+                metric_connection_slots_limit:del({old_svc, old_ns})
+            end
             if not metric_connections then return end
             for _, state in ipairs({"active", "reading", "writing", "waiting"}) do
                 metric_connections:del({state, old_svc, old_ns})
@@ -285,12 +307,17 @@ end
 
 -- content_by_lua_block of `location = /metrics` on :9145
 function _M.collect()
-    if metric_connections then
+    if metric_connections or metric_connection_slots_limit then
         local app, namespace = own()
-        metric_connections:set(ngx.var.connections_active  or 0, {"active",  app, namespace})
-        metric_connections:set(ngx.var.connections_reading or 0, {"reading", app, namespace})
-        metric_connections:set(ngx.var.connections_writing or 0, {"writing", app, namespace})
-        metric_connections:set(ngx.var.connections_waiting or 0, {"waiting", app, namespace})
+        if metric_connections then
+            metric_connections:set(ngx.var.connections_active  or 0, {"active",  app, namespace})
+            metric_connections:set(ngx.var.connections_reading or 0, {"reading", app, namespace})
+            metric_connections:set(ngx.var.connections_writing or 0, {"writing", app, namespace})
+            metric_connections:set(ngx.var.connections_waiting or 0, {"waiting", app, namespace})
+        end
+        if metric_connection_slots_limit then
+            metric_connection_slots_limit:set(connection_slots_limit, {app, namespace})
+        end
     end
     prometheus:collect()
 end

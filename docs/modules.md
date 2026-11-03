@@ -52,6 +52,7 @@ keep them true.
 | [`client_subnet`](#client_subnetlua) | Mask client IP to a subnet | ✅ | `mask` |
 | [`gauge_expiry`](#gauge_expirylua) | Delete gauge series that go stale | ✅ | `new`, `touch`, `sweep`, `start` |
 | [`app_toggle`](#app_togglelua) | Per-leg metrics on/off | ✅ | `enabled` |
+| [`connection_slots`](#connection_slotslua) | worker_connections × workers, for `nginx_connection_slots_limit` | ✅ (reader injected) | `parse_worker_connections`, `limit` |
 | [`source_attribution`](#source_attributionlua) | Who called us (static/PTR/mesh) | mostly | `new_resolver`, `classify_static`, `apply_waypoint_override`, `parse_ptr`, `parse_xfcc` |
 | [`self_identity`](#self_identitylua) | Who am I (own service/ns via PTR) | needs ngx | `new`, `get`, `is_resolved`, `start` |
 | [`caller_identity`](#caller_identitylua) | Build + start resolver and own identity from config | needs ngx | `build` |
@@ -87,6 +88,8 @@ Key groups (see inline comments in the file for the full set):
 - `http.discover_identity` / `app` / `namespace` — own-identity discovery and
   its fallback.
 - `http.histogram_buckets*` — bucket boundaries (seconds / bytes / counts).
+- `http.worker_connections` / `nginx_conf_path` — where the connection-slot
+  limit comes from ([`connection_slots`](#connection_slotslua)).
 - `intercept.*` — CA cert/key paths, leaf cert TTL and key size; DNS server,
   DNS cache lifetime and connection-pool limits for re-origination.
 - `stream.*` + `apps.stream.*` — the L4 counterparts.
@@ -230,6 +233,31 @@ stream destination) without touching the traffic itself.
 `metrics_enabled = false`, means **enabled** — opt-out, not opt-in, so a new
 destination gets metrics by default. **Invariant:** this gates *recording* only;
 never let it gate the proxying.
+
+---
+
+## `connection_slots.lua`
+
+**Why:** the dashboard compares connection slots in use against nginx's
+ceiling, and when that ceiling is hit nginx refuses connections ("worker_connections
+are not enough"). nginx gives Lua the worker count (`ngx.worker.count()`) but
+not `worker_connections`, so something has to supply it.
+
+**API**
+- `parse_worker_connections(content) → n | nil`: the first
+  `worker_connections N;` in an nginx config, comments ignored.
+- `limit(cfg, worker_count[, read_file]) → limit, source | nil, reason`.
+
+**Order:** `http.worker_connections` when > 0 (`source = "config"`), else the
+directive in `http.nginx_conf_path` (default `/etc/nginx/nginx.conf`, the
+image's main config; `source = "nginx.conf"`), else nothing. Directives inside
+`include`d files aren't followed; set `http.worker_connections` then.
+
+**Wiring:** `http_metrics.init()` calls it once per worker. A known limit
+registers `nginx_connection_slots_limit{app, namespace}`, set in `collect()` on
+every scrape like `nginx_http_connections`. An unknown limit registers nothing
+and logs one `warn` line from worker 0. **Invariant:** never export a guessed
+value; "No data" on the dashboard is the honest answer.
 
 ---
 
