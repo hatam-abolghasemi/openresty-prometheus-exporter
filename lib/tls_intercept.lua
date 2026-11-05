@@ -1,6 +1,6 @@
 -- tls_intercept.lua
 -- Per-SNI leaf-certificate minting for HTTPS interception (the
--- 127.0.0.1:3129 server in docker/conf.d/intercept.conf). On each TLS handshake it
+-- 127.0.0.1:3129 server in docker/optional/intercept.conf). On each TLS handshake it
 -- mints -- and caches -- a short-lived leaf certificate for the requested SNI,
 -- signed by a CA that is mounted into THIS container only (never the app's).
 -- That lets the :3129 server terminate the app's outbound TLS, read the real

@@ -127,6 +127,11 @@ hook does.
 are resolved by [`source_attribution`](modules.md#source_attributionlua) in
 this order:
 
+0. Kubelet health probes (`User-Agent: kube-probe/…`) are labelled
+   `probe_default_service` / `probe_default_namespace` (`health-probe` /
+   `default`) and nothing else is looked up. A probe connects from its node's
+   IP, which would otherwise be classified by the node's subnet. Off with
+   `http.probe_by_user_agent=false`.
 1. A static table of known internal subnets (`static_ranges` in
    `metrics_config.lua`).
 2. Reverse-DNS (PTR) of the caller's pod IP against CoreDNS.
@@ -150,7 +155,7 @@ nginx container; nothing to mount:
 ```yaml
 env:
   - name: METRICS_CONFIG
-    value: "http.metric_latency_hist=false;http.label_host=false"
+    value: "http.metric_latency_hist=true;http.label_host=false"
 ```
 
 Unknown settings are logged at `error` and skipped. For tables (buckets,
@@ -161,12 +166,16 @@ knobs:
 | Want to… | Change |
 |---|---|
 | Add/drop a label | `label_method`, `label_route`, `label_host`, `label_source_service`, … |
-| Turn a metric off | `metric_requests`, `metric_latency`, `metric_latency_hist`, … |
+| Turn a metric on/off | `metric_requests`, `metric_latency`, `metric_latency_hist` (off by default, like every histogram), … |
 | Fix caller resolution | `static_ranges`, `cluster_ip_prefix`, `ptr_dns_server` |
 | Tune route collapsing | the `sanitize` table — see [`route_sanitizer`](modules.md#route_sanitizerlua) |
 | Change histogram buckets | `histogram_buckets` (seconds), `histogram_buckets_*` (file only) |
 
-In `METRICS_CONFIG` these are `http.<key>`, e.g. `http.metric_latency_hist=false`.
+In `METRICS_CONFIG` these are `http.<key>`, e.g. `http.metric_latency_hist=true`.
+
+Access logs are off in the image: the metrics cover every request. To log one
+server's requests, add `access_log /dev/stdout combined buffer=64k flush=1s;`
+inside its `server {}` block in a mounted `default.conf`.
 
 > **One shared config, many Deployments.** With `discover_identity = true`
 > (default) each pod discovers its own service/namespace via PTR, so the same

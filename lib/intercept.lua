@@ -12,8 +12,15 @@
 --   INTERCEPT_BYPASS     comma list of hosts to never intercept (mTLS/pinning).
 --
 -- Off by default: with INTERCEPT_TLS unset, should() is always false, so the
--- proxy behaves exactly as a plain CONNECT passthrough and :3129 never sees
--- traffic. Values are read once per worker (env is fixed for the process).
+-- proxy behaves exactly as a plain CONNECT passthrough. Values are read once
+-- per worker (env is fixed for the process).
+--
+-- The :3129 server (docker/optional/intercept.conf) is only loaded when the
+-- image entrypoint saw INTERCEPT_TLS=on at container start. If the env var is
+-- on but that config isn't loaded (entrypoint bypassed by a `command:`
+-- override, or a hand-written nginx.conf), handing CONNECTs to :3129 would
+-- break every HTTPS call, so interception stays off and one error is logged.
+-- `ssl_mint_cache` is the marker: it is declared only in intercept.conf.
 
 local _M = {}
 
@@ -29,10 +36,22 @@ local function parse_set(csv, default_csv)
     return out
 end
 
+-- True when intercept.conf is part of the running config. Pure apart from
+-- reading ngx.shared, which is fixed once nginx has started.
+local function terminator_loaded()
+    return ngx ~= nil and ngx.shared ~= nil and ngx.shared.ssl_mint_cache ~= nil
+end
+
 local function config()
     if conf then return conf end
+    local wanted = (os.getenv("INTERCEPT_TLS") == "on")
+    local enabled = wanted and terminator_loaded()
+    if wanted and not enabled then
+        ngx.log(ngx.ERR, "intercept: INTERCEPT_TLS=on but intercept.conf isn't loaded ",
+                "(container started without the image entrypoint?); tunnelling CONNECTs unchanged")
+    end
     conf = {
-        enabled = (os.getenv("INTERCEPT_TLS") == "on"),
+        enabled = enabled,
         ports   = parse_set(os.getenv("INTERCEPT_TLS_PORTS"), "443"),
         bypass  = parse_set(os.getenv("INTERCEPT_BYPASS"), nil),
     }

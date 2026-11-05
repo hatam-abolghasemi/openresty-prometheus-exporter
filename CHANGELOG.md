@@ -3,6 +3,54 @@
 Dated entries for this project's own code. The vendored library under
 `vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
 
+### 2026-11-05
+
+Leaner defaults: things a sidecar pays for on every pod, whether it uses them or
+not, are now off until asked for.
+
+- **Every histogram is off by default.** `http.metric_latency_hist`,
+  `stream.metric_session_duration`, `stream.metric_upstream_connect_time_hist`
+  and `stream.metric_upstream_first_byte_time` join the size and connection
+  histograms, which were already off. A histogram is (buckets + 3) series per
+  label combination, the largest share of the `prometheus_metrics` shared dict
+  and of the scrape. Counters and last-value gauges are unchanged. Turn one back
+  on with e.g. `METRICS_CONFIG="http.metric_latency_hist=true"`. The
+  dashboard's percentile panels (Summary p95, Latency percentiles, L4
+  percentiles) show *No data* until you do.
+- **https interception is only loaded when it's on.** `intercept.conf` moved
+  from `conf.d/` to `optional/` (`/etc/nginx/optional/` in the image). A new
+  entrypoint (`docker/entrypoint.sh`) links it into `conf.d/` when the
+  container starts with `INTERCEPT_TLS=on`, then execs the command. With it off
+  there's no `:3129` listener, OpenSSL context, system CA bundle in memory or
+  `ssl_mint_cache`. The decision is made once per container start: changing
+  `INTERCEPT_TLS` needs a restart, not a reload. A Deployment that sets
+  `command:` skips the entrypoint; `lib/intercept.lua` then keeps interception
+  off and logs one error, instead of sending CONNECTs to a port nobody listens
+  on. Use `args:`, or start `command:` with the entrypoint. The image restates
+  `CMD ["openresty", "-g", "daemon off;"]` (setting ENTRYPOINT clears the base
+  CMD), and the build fails if `openresty` isn't on PATH.
+- **Access log off by default.** The metrics already cover every request; per
+  request log lines cost a write each plus log-pipeline storage. To get them
+  back for one server, add
+  `access_log /dev/stdout combined buffer=64k flush=1s;` inside its `server {}`.
+- **`worker_connections` 4096 → 1024** in the image's `nginx.conf`. Slots are
+  preallocated (~0.45 KB each), and a sidecar in front of one app rarely needs
+  more. `nginx_connection_slots_limit` now reads 1024; raise it in a mounted
+  `nginx.conf` for high-traffic services.
+- **Fix: kubelet probes were labelled as their node's subnet.** A probe
+  connects from the node's own IP, so with the node range in `static_ranges`,
+  `/health` traffic showed up as e.g. `source_service="internal"`,
+  `source_namespace="zone_d"`. Requests with `User-Agent: kube-probe/…` (every
+  kubelet probe sends it) are now labelled `probe_default_service` /
+  `probe_default_namespace` (`health-probe` / `default`) whatever their source
+  IP, with no lookup. No path is assumed. New `source_attribution.is_probe()`;
+  settings `http.probe_by_user_agent` (default on) and
+  `http.probe_user_agent_prefix` (`kube-probe/`).
+- Tests: defaults keep every histogram off; `intercept` routes to `:3129` only
+  when on *and* loaded. The image smoke test now asserts no histogram, no
+  access-log line and no `:3129` by default, `:3129` present with
+  `INTERCEPT_TLS=on`, and that `METRICS_CONFIG` turns the latency histogram on.
+
 ### 2026-11-03
 
 - **New metric: `nginx_connection_slots_limit{app, namespace}`.** The

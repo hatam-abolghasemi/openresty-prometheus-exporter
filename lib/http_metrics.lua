@@ -220,6 +220,15 @@ function _M.classify_source()
         return
     end
 
+    -- kubelet probe: comes from the node's IP, which says nothing about the
+    -- caller; label it as a probe and skip resolution entirely
+    if cfg.probe_by_user_agent
+       and source_attribution.is_probe(ngx.var.http_user_agent, cfg.probe_user_agent_prefix) then
+        ngx.ctx.source_service   = cfg.probe_default_service
+        ngx.ctx.source_namespace = cfg.probe_default_namespace
+        return
+    end
+
     local service, namespace = resolver:resolve(ngx.var.remote_addr)
 
     -- mesh override: only trusts XFCC once the direct peer has already been

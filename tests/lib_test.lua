@@ -148,7 +148,16 @@ end)
 test("slots: the image's nginx.conf parses", function()
     local f = assert(io.open("docker/nginx.conf", "r"))
     local content = f:read("*a"); f:close()
-    eq(slots.parse_worker_connections(content), 4096)
+    eq(slots.parse_worker_connections(content), 1024)
+end)
+test("probe: kubelet user agent", function()
+    eq(sa.is_probe("kube-probe/1.30", "kube-probe/"), true)
+    eq(sa.is_probe("kube-probe/1.30+", "kube-probe/"), true)
+    eq(sa.is_probe("curl/8.5.0", "kube-probe/"), false)
+    eq(sa.is_probe("Mozilla/5.0 kube-probe/1.30", "kube-probe/"), false)
+    eq(sa.is_probe(nil, "kube-probe/"), false)
+    eq(sa.is_probe("kube-probe/1.30", ""), false)
+    eq(sa.is_probe("kube-probe/1.30", nil), false)
 end)
 
 -- Schema and values must line up name-for-name with every label on, not just
@@ -436,11 +445,11 @@ do
     test("config_env: boolean switch, only that key changes", function()
         local cfg = fresh()
         local before = snapshot(cfg)
-        local _, errs = config_env.apply(cfg, "http.metric_latency_hist=false")
-        eq(#errs, 0); eq(cfg.http.metric_latency_hist, false)
+        local _, errs = config_env.apply(cfg, "http.metric_latency_hist=true")
+        eq(#errs, 0); eq(cfg.http.metric_latency_hist, true)
         eq(changed(before, cfg), "http.metric_latency_hist")
-        config_env.apply(cfg, "http.metric_latency_hist=true")
-        eq(cfg.http.metric_latency_hist, true)
+        config_env.apply(cfg, "http.metric_latency_hist=false")
+        eq(cfg.http.metric_latency_hist, false)
     end)
     test("config_env: numbers, strings, nested, separators, last wins", function()
         local cfg = fresh()
@@ -461,7 +470,7 @@ do
         eq(#errs, 1); eq(#logged, 1)
         assert(logged[1]:find("METRICS_CONFIG", 1, true) and logged[1]:find("http.metric_latency_histogram", 1, true))
         eq(cfg.http.metric_latency_histogram, nil)
-        eq(cfg.http.metric_latency_hist, true)
+        eq(cfg.http.metric_latency_hist, false)
         eq(cfg.http.metric_requests, false)
     end)
     test("config_env: wrong type, tables and malformed entries leave config untouched", function()
@@ -504,7 +513,7 @@ do
         package.loaded["metrics_config"], package.loaded["config_env"] = nil, nil
         local reads = 0
         os.getenv = function(name)
-            if name == "METRICS_CONFIG" then reads = reads + 1; return "http.metric_latency_hist=false;bad.key=1" end
+            if name == "METRICS_CONFIG" then reads = reads + 1; return "http.metric_latency_hist=true;bad.key=1" end
             return saved_getenv(name)
         end
         local saved_stderr = io.stderr
@@ -514,7 +523,7 @@ do
             local ce = require("config_env")
             local cfg = ce.load()
             eq(cfg, require("metrics_config"))
-            eq(cfg.http.metric_latency_hist, false)
+            eq(cfg.http.metric_latency_hist, true)
             eq(ce.load(), cfg); eq(reads, 1)
             assert(table.concat(errout):find("bad.key", 1, true))
         end)
@@ -524,7 +533,65 @@ do
         if not ok then error(err, 0) end
     end)
     test("config_env: defaults untouched without the env var", function()
-        eq(require("config_env").load().http.metric_latency_hist, true)
+        eq(require("config_env").load().http.metric_latency_hist, false)
+    end)
+end
+
+-- Every histogram is off by default (its buckets dominate shared-dict size).
+test("defaults: every histogram is off", function()
+    local saved = package.loaded["metrics_config"]
+    package.loaded["metrics_config"] = nil
+    local cfg = require("metrics_config")
+    package.loaded["metrics_config"] = saved
+    for _, k in ipairs({ "metric_latency_hist", "metric_request_size_histogram",
+                         "metric_response_size_histogram", "metric_connection_requests_histogram",
+                         "metric_connection_time_histogram" }) do
+        if cfg.http[k] ~= false then error("http." .. k .. " is not off") end
+    end
+    for _, k in ipairs({ "metric_session_duration", "metric_upstream_connect_time_hist",
+                         "metric_upstream_first_byte_time" }) do
+        if cfg.stream[k] ~= false then error("stream." .. k .. " is not off") end
+    end
+end)
+
+-- intercept: hands CONNECTs to :3129 only when INTERCEPT_TLS=on AND
+-- intercept.conf is loaded (its ssl_mint_cache dict is the marker).
+do
+    local function run(env, loaded)
+        local saved_ngx, saved_getenv = _G.ngx, os.getenv
+        local logs = {}
+        _G.ngx = {
+            ERR = 4,
+            log = function(_, ...) logs[#logs + 1] = table.concat({ ... }) end,
+            shared = loaded and { ssl_mint_cache = {} } or {},
+            var = { request_method = "CONNECT", host = "api.example.com", request_port = "443" },
+        }
+        os.getenv = function(name)
+            if name == "INTERCEPT_TLS" then return env end
+            return saved_getenv(name)
+        end
+        package.loaded["intercept"] = nil
+        local ok, a, b = pcall(function()
+            local ic = require("intercept")
+            return ic.upstream(), ic.upstream()
+        end)
+        package.loaded["intercept"] = nil
+        _G.ngx, os.getenv = saved_ngx, saved_getenv
+        if not ok then error(a, 0) end
+        return a, b, logs
+    end
+    test("intercept: off passes CONNECT through", function()
+        local up, _, logs = run(nil, false)
+        eq(up, "api.example.com:443"); eq(#logs, 0)
+    end)
+    test("intercept: on and loaded goes to :3129", function()
+        local up, _, logs = run("on", true)
+        eq(up, "127.0.0.1:3129"); eq(#logs, 0)
+    end)
+    test("intercept: on but not loaded passes through, logs once", function()
+        local up, again, logs = run("on", false)
+        eq(up, "api.example.com:443"); eq(again, "api.example.com:443"); eq(#logs, 1)
+        assert(logs[1]:find("isn't loaded", 1, true))
     end)
 end
 

@@ -1,6 +1,6 @@
 -- intercept_origin.lua
 -- Re-origination for the https interception server (127.0.0.1:3129 in
--- docker/conf.d/intercept.conf): sends each decrypted request on to its real
+-- docker/optional/intercept.conf): sends each decrypted request on to its real
 -- destination over a pooled, verified TLS connection instead of a fresh one.
 --
 -- Without it, :3129 used `proxy_pass https://$host...`, which keeps no pool:

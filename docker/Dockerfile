@@ -3,8 +3,8 @@
 ARG BASE_IMAGE=openresty/openresty
 ARG OPENRESTY_TAG
 
-# The :3129 interception server needs a certificate on disk to start and to
-# pass `nginx -t`; real handshakes get a minted one (lib/tls_intercept.lua).
+# The :3129 interception server (loaded only with INTERCEPT_TLS=on) needs a
+# certificate on disk to start and to pass `nginx -t`; real handshakes get a minted one (lib/tls_intercept.lua).
 # Generated once on the build host, so no flavor needs an openssl binary.
 FROM --platform=$BUILDPLATFORM alpine AS fallback-cert
 RUN apk add --no-cache openssl \
@@ -22,11 +22,20 @@ COPY lib/ /opt/prometheus/lib/
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/main.d/ /etc/nginx/main.d/
 COPY docker/conf.d/ /etc/nginx/conf.d/
+COPY docker/optional/ /etc/nginx/optional/
 COPY --from=fallback-cert /fallback.crt /fallback.key /etc/nginx/intercept/
 COPY docker/setup.sh /tmp/setup.sh
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/openresty-exporter-entrypoint
 
 RUN sh /tmp/setup.sh && rm /tmp/setup.sh
 
 ENV APP_PORT=8080
 
 EXPOSE 80 9145
+
+# The entrypoint picks optional configs (https interception) once per start,
+# then execs CMD. Setting ENTRYPOINT clears the base image's CMD, so it is
+# restated here; `openresty` on PATH is the flavor's own binary (setup.sh
+# checks it), the same one the base CMD runs.
+ENTRYPOINT ["/usr/local/bin/openresty-exporter-entrypoint"]
+CMD ["openresty", "-g", "daemon off;"]

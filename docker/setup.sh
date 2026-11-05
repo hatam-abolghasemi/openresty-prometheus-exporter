@@ -46,6 +46,10 @@ fi
 bundle=$(find_bundle) || { echo "setup: no CA bundle found or installable" >&2; exit 1; }
 ln -sf "$bundle" /etc/nginx/intercept/trusted-ca.crt
 
-# 3. Directories that are empty in the image and filled by mounts.
+# 3. The image's CMD runs `openresty` from PATH; make sure it resolves to this
+#    flavor's binary, so a flavor where it doesn't fails the build, not the pod.
+command -v openresty > /dev/null || { echo "setup: no openresty on PATH" >&2; exit 1; }
+
+# 4. Directories that are empty in the image and filled by mounts.
 mkdir -p /etc/nginx/main.d /etc/nginx/conf.d /etc/nginx/stream.d
 chmod -R a+rX /opt/prometheus

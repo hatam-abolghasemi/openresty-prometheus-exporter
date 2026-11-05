@@ -45,7 +45,7 @@ spec:
         env:
         - { name: APP_PORT, value: "8080" }
         # override simple metrics_config.lua values, see docs/modules.md#config_envlua
-        # - { name: METRICS_CONFIG, value: "http.metric_latency_hist=false;http.expiry_window=30" }
+        # - { name: METRICS_CONFIG, value: "http.metric_latency_hist=true;http.expiry_window=30" }
         ports:
         - { name: http,           containerPort: 80 }
         - { name: metrics,        containerPort: 9145 }

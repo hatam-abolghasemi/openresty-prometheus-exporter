@@ -111,6 +111,16 @@ function _M.parse_xfcc(header)
   return ns, sa
 end
 
+-- True when a request's User-Agent marks it as a kubelet health probe
+-- (`kube-probe/1.30`), i.e. it starts with `prefix`. Pure. The header is
+-- client-set, so this only decides a metric label, never access.
+function _M.is_probe(user_agent, prefix)
+  if type(user_agent) ~= "string" or type(prefix) ~= "string" or prefix == "" then
+    return false
+  end
+  return user_agent:sub(1, #prefix) == prefix
+end
+
 -- If `service` is the known mesh waypoint, recovers the real caller's
 -- identity from the XFCC header instead. Otherwise returns service,
 -- namespace unchanged.

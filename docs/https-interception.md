@@ -29,7 +29,7 @@ app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :312
 2. [`intercept.should()`](modules.md#interceptlua) decides, per CONNECT, whether
    this is an intercepted port on a non-bypassed host. If yes, `:3128` tunnels
    it to the local terminator `127.0.0.1:3129` instead of the real host.
-3. `:3129` ([`conf.d/intercept.conf`](../docker/conf.d/intercept.conf) +
+3. `:3129` ([`optional/intercept.conf`](../docker/optional/intercept.conf) +
    [`tls_intercept`](modules.md#tls_interceptlua)) terminates the TLS using a
    leaf certificate **minted on the fly for the requested SNI**, signed by a CA
    you provide. It reads the now-decrypted request and records it with the same
@@ -42,8 +42,13 @@ app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :312
    request costs no extra round trips to the destination once a connection to
    it is warm.
 
-The whole machinery is **baked into the image**. A deployment enables it with
+The whole machinery ships in the image. A deployment enables it with
 one env var plus a mounted CA — no config file changes.
+
+With interception off (the default) none of it is loaded: the image's
+entrypoint links `intercept.conf` into `conf.d/` only when the container
+starts with `INTERCEPT_TLS=on`. So a sidecar that doesn't intercept has no
+`:3129` listener, no OpenSSL context and no system CA bundle in memory.
 
 ---
 
@@ -91,8 +96,17 @@ Optional env:
 | `INTERCEPT_TLS_PORTS` | `443` | Comma list of TLS ports to intercept |
 | `INTERCEPT_BYPASS` | (none) | Comma list of hosts to **never** intercept (mTLS / cert-pinned destinations) |
 
-These are read once per worker, so changing them needs a pod restart (a
-Deployment env change does that anyway).
+`INTERCEPT_TLS` is read once, when the container starts, and decides whether
+the `:3129` terminator is loaded at all; the others are read once per worker.
+Changing any of them needs a container restart, not a reload (a Deployment
+env change restarts the pod anyway).
+
+The decision is made by the image's entrypoint. If your Deployment sets
+`command:` for the nginx container, the entrypoint is skipped and interception
+stays off (the sidecar logs `INTERCEPT_TLS=on but intercept.conf isn't loaded`
+and tunnels HTTPS unchanged). Set `args:` instead of `command:`, or keep the
+entrypoint first:
+`command: ["/usr/local/bin/openresty-exporter-entrypoint", "openresty", "-g", "daemon off;"]`.
 
 ### 3. Make the app trust the CA — mount `ca.crt` (cert only)
 
@@ -237,10 +251,11 @@ same discipline.
 | Symptom | Cause / fix |
 |---|---|
 | App: `SSL certificate problem: unable to get local issuer certificate` | The app doesn't trust your CA — the trust step (3) isn't applied, or applied to a client that reads a different bundle. For curl test manually: `curl --cacert /etc/intercept/ca.crt https://host/` |
-| Metrics still show `method="CONNECT"` | Interception didn't fire: `INTERCEPT_TLS` not `on`, CA not mounted, port not in `INTERCEPT_TLS_PORTS`, or host is in `INTERCEPT_BYPASS` |
+| Metrics still show `method="CONNECT"` | Interception didn't fire: `INTERCEPT_TLS` not `on`, CA not mounted, port not in `INTERCEPT_TLS_PORTS`, host is in `INTERCEPT_BYPASS`, or the container's `command:` skipped the entrypoint (log line `intercept.conf isn't loaded`; see step 2) |
+| Container exits with `INTERCEPT_TLS=on but /etc/nginx/conf.d/intercept.conf can't be created` | `conf.d/` is read-only (a whole-directory ConfigMap mount, or `readOnlyRootFilesystem`). Mount your `default.conf` with `subPath` so `conf.d/` stays writable |
 | `502`/`504` on a specific host after enabling | Re-origination's `proxy_ssl_verify` rejected the real cert (good — bad/expired upstream cert), **or** egress to that host is blocked. Check `kubectl logs <pod> -c nginx` for `certificate verify failed` vs a connect timeout |
 | `CONNECT tunnel failed, response 500` right after enabling | A Lua error on the `:3129` leg — almost always a CA read/parse problem. `kubectl logs <pod> -c nginx` will have a `tls_intercept:` line naming it (can't read CA, parse failure). `Permission denied` on `ca.key` means the file isn't readable by the nginx workers (they don't run as root): keep the Secret's default `0644`, or set `defaultMode` accordingly |
 | Works for curl, not for the app's own calls | The app uses a client that reads a different trust store than the one you configured (e.g. PHP streams, not libcurl; or Python without `REQUESTS_CA_BUNDLE`) |
-| `nginx -t` fails after a config change | The `:3129` server needs the baked `fallback.crt`/`fallback.key` and `ssl_mint_cache` — don't remove `conf.d/intercept.conf` or `main.d/intercept-env.conf` from the image |
+| `nginx -t` fails after a config change | The `:3129` server needs the baked `fallback.crt`/`fallback.key` and `ssl_mint_cache` — don't remove `optional/intercept.conf` or `main.d/intercept-env.conf` from the image |
 
 Next: [stream](stream.md).

@@ -39,7 +39,7 @@ individually toggleable):
 |---|---|---|
 | `nginx_http_requests_total` | counter | Request count. The workhorse — rate() this |
 | `nginx_http_request_duration_seconds` | gauge | Last request duration (expired by [`gauge_expiry`](modules.md#gauge_expirylua)) |
-| `nginx_http_request_duration_seconds_histogram` | histogram | Duration distribution; buckets = `histogram_buckets` |
+| `nginx_http_request_duration_seconds_histogram` | histogram | Duration distribution; buckets = `histogram_buckets`. Off by default (`http.metric_latency_hist`) |
 | `nginx_http_request_size_bytes` | gauge | Last request size |
 | `nginx_http_request_size_bytes_histogram` | histogram | off by default |
 | `nginx_http_response_size_bytes` | gauge | Last response size |
@@ -85,10 +85,10 @@ On `:9254/metrics`. Labels: `destination` (your `$destination_name`),
 | `nginx_stream_upstream_bytes_sent_total` | counter | Bytes to the upstream leg |
 | `nginx_stream_upstream_bytes_received_total` | counter | Bytes from the upstream leg |
 | `nginx_stream_session_duration_seconds` | gauge | Last session length |
-| `nginx_stream_session_duration_seconds_histogram` | histogram | Session length distribution |
+| `nginx_stream_session_duration_seconds_histogram` | histogram | Session length distribution. Off by default (`stream.metric_session_duration`) |
 | `nginx_stream_upstream_connect_time_seconds` | gauge | How fast the dependency accepts the connection |
-| `nginx_stream_upstream_connect_time_seconds_histogram` | histogram | …distribution |
-| `nginx_stream_upstream_first_byte_time_seconds` | histogram | Time to first byte from the dependency; buckets = `histogram_buckets_connect_time` |
+| `nginx_stream_upstream_connect_time_seconds_histogram` | histogram | …distribution. Off by default (`stream.metric_upstream_connect_time_hist`) |
+| `nginx_stream_upstream_first_byte_time_seconds` | histogram | Time to first byte from the dependency; buckets = `histogram_buckets_connect_time`. Off by default (`stream.metric_upstream_first_byte_time`) |
 
 The two "how fast does my dependency answer" gauges
 (`upstream_connect_time`, `session_duration`) are expired by `gauge_expiry` so a
@@ -130,7 +130,7 @@ sum by (route) (rate(nginx_http_requests_total{mode="0"}[5m]))
 sum(rate(nginx_http_requests_total{mode="0",status=~"5.."}[5m]))
   / sum(rate(nginx_http_requests_total{mode="0"}[5m]))
 
-# p95 inbound latency (histogram)
+# p95 inbound latency (needs http.metric_latency_hist=true)
 histogram_quantile(0.95,
   sum by (le) (rate(nginx_http_request_duration_seconds_histogram_bucket{mode="0"}[5m])))
 
@@ -141,7 +141,7 @@ sum by (source_service, source_namespace) (
 # outbound calls by destination host (incl. decrypted HTTPS from https interception)
 sum by (host, status) (rate(nginx_http_requests_total{mode="1"}[5m]))
 
-# how fast is my Redis answering (stream)
+# how fast is my Redis answering (stream; needs stream.metric_upstream_connect_time_hist=true)
 histogram_quantile(0.99,
   sum by (le, destination) (rate(nginx_stream_upstream_connect_time_seconds_histogram_bucket[5m])))
 

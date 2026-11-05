@@ -112,8 +112,9 @@ works without the rest. See [Modules](modules.md).
 
 Everything works, but you own the plumbing the image otherwise handles:
 
-- **Interception machinery** — the image bakes in `conf.d/intercept.conf` (the
-  `:3129` terminator + `ssl_mint_cache`), `main.d/intercept-env.conf` (the
+- **Interception machinery** — the image ships `optional/intercept.conf` (the
+  `:3129` terminator + `ssl_mint_cache`, linked into `conf.d/` by the
+  entrypoint only when `INTERCEPT_TLS=on`), `main.d/intercept-env.conf` (the
   `env INTERCEPT_TLS …` declarations so workers can read them), and a
   `fallback.crt`/`fallback.key`. For https interception off-image you must reproduce those
   yourself.

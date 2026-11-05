@@ -108,7 +108,7 @@ with the image's on every upgrade. One env var names only what changes.
 ```yaml
 env:
   - name: METRICS_CONFIG
-    value: "http.metric_latency_hist=false;http.expiry_window=30"
+    value: "http.metric_latency_hist=true;http.expiry_window=30"
 ```
 
 Entries are `path=value`, separated by `;` or newlines (so a YAML `|` block
@@ -394,7 +394,11 @@ straight through — kept out of nginx config so the only thing an app's
 
 **Config source:** env vars `INTERCEPT_TLS` / `INTERCEPT_TLS_PORTS` (default
 `443`) / `INTERCEPT_BYPASS`, read **once per worker** and memoised — so a change
-needs a worker (pod) restart. Those vars only reach Lua because
+needs a container restart. Interception is on only when `INTERCEPT_TLS=on`
+**and** the `:3129` terminator is loaded (`ngx.shared.ssl_mint_cache` exists,
+i.e. the entrypoint linked `intercept.conf` in at start); with the env var on
+but the config missing, it stays off and logs one error per worker, rather than
+sending every CONNECT to a port nobody listens on. Those vars only reach Lua because
 `docker/main.d/intercept-env.conf` declares them with `env`; off-image you must
 declare them yourself.
 

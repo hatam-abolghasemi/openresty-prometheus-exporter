@@ -213,6 +213,8 @@ jobs:
 
           # inbound
           [ "$(probe http://127.0.0.1/)" = "app-ok" ]
+          # a kubelet probe is labelled as one, whatever its source IP
+          [ "$(probe -A kube-probe/1.30 http://127.0.0.1/)" = "app-ok" ]
           # outbound, plain HTTP and CONNECT
           [ "$(probe -o /dev/null -w '%{http_code}' -x http://127.0.0.1:3128 http://example.com/)" = "200" ]
           [ "$(probe -o /dev/null -w '%{http_code}' -x http://127.0.0.1:3128 https://example.com/)" = "200" ]
@@ -223,9 +225,23 @@ jobs:
           echo "$metrics" | grep -q 'mode="0"'
           echo "$metrics" | grep -q 'method="CONNECT".*mode="1"'
           echo "$metrics" | grep -q '^nginx_http_connections{state="active"'
-          # worker_connections (4096, docker/nginx.conf) x worker_processes (1)
-          echo "$metrics" | grep -Eq '^nginx_connection_slots_limit\{.*\} 4096$'
+          echo "$metrics" | grep -q 'source_service="health-probe",source_namespace="default"'
+          # worker_connections (1024, docker/nginx.conf) x worker_processes (1)
+          echo "$metrics" | grep -Eq '^nginx_connection_slots_limit\{.*\} 1024$'
           echo "$metrics" | grep -qx 'nginx_metric_errors_total 0'
+          # defaults: histograms off, no access log, interception not loaded
+          if echo "$metrics" | grep -q '_histogram_bucket'; then
+            echo "::error::a histogram is on by default"
+            exit 1
+          fi
+          if docker logs smoke-nginx 2>&1 | grep -q '"GET / HTTP'; then
+            echo "::error::access log is on by default"
+            exit 1
+          fi
+          if docker exec smoke-nginx nginx -T 2>/dev/null | grep -q '127.0.0.1:3129'; then
+            echo "::error::intercept.conf is loaded with INTERCEPT_TLS unset"
+            exit 1
+          fi
 
       - name: Smoke test https interception
         if: steps.smoke-build.outputs.run == 'true'
@@ -241,6 +257,7 @@ jobs:
             -v "$ca/ca.crt:/etc/nginx/intercept/ca.crt:ro" \
             -v "$ca/ca.key:/etc/nginx/intercept/ca.key:ro" \
             openresty-prometheus:smoke
+          docker exec smoke-intercept nginx -T 2>/dev/null | grep -q '127.0.0.1:3129'
           probe() { docker run --rm --network container:smoke-intercept -v "$ca/ca.crt:/ca.crt:ro" curlimages/curl -sS --retry 10 --retry-connrefused --retry-delay 1 -m 15 "$@"; }
 
           [ "$(probe --cacert /ca.crt -o /dev/null -w '%{http_code}' -x http://127.0.0.1:3128 https://example.com/)" = "200" ]
@@ -260,7 +277,7 @@ jobs:
           docker run -d --name smoke-envcfg-app busybox \
             sh -c 'mkdir -p /www && echo app-ok > /www/index.html && httpd -f -p 8080 -h /www'
           docker run -d --name smoke-envcfg --network container:smoke-envcfg-app \
-            -e METRICS_CONFIG='http.metric_latency_hist=false;http.metric_latency_histogram=false;http.worker_connections=1000' \
+            -e METRICS_CONFIG='http.metric_latency_hist=true;http.metric_latency_histogram=false;http.worker_connections=1000' \
             openresty-prometheus:smoke
           probe() { docker run --rm --network container:smoke-envcfg-app curlimages/curl -sS --retry 10 --retry-connrefused --retry-delay 1 -m 15 "$@"; }
 
@@ -268,10 +285,8 @@ jobs:
           metrics=$(probe http://127.0.0.1:9145/metrics)
           echo "$metrics" | grep -q '^nginx_http_request_duration_seconds{'
           echo "$metrics" | grep -Eq '^nginx_connection_slots_limit\{.*\} 1000$'
-          if echo "$metrics" | grep -q '^nginx_http_request_duration_seconds_histogram'; then
-            echo "::error::METRICS_CONFIG did not turn the latency histogram off"
-            exit 1
-          fi
+          echo "$metrics" | grep -q '^nginx_http_request_duration_seconds_histogram_bucket{' \
+            || { echo "::error::METRICS_CONFIG did not turn the latency histogram on"; exit 1; }
           echo "$metrics" | grep -qx 'nginx_metric_errors_total 0'
           docker logs smoke-envcfg 2>&1 | grep -q 'METRICS_CONFIG: skipped "http.metric_latency_histogram": unknown setting'
 

@@ -31,9 +31,9 @@ filter lives on the tab that uses it.
 
 | Tab | Shows | Tab filters |
 |---|---|---|
-| Summary | In/out req/s, 5xx ratio and p95; a request status table; request count, response time and status-class ratio over time | host, route, status |
+| Summary | In/out req/s, 5xx ratio and p95¹; a request status table; request count, response time and status-class ratio over time | host, route, status |
 | Request breakdown | Request rate by status, method and host/route; per pod; inbound by caller (`source_namespace : source_service`); outbound by destination host | host, route, status |
-| Latency percentiles | p99 / p95 / p50 per status, method and host/route | host, route, status |
+| Latency percentiles | p99 / p95 / p50 per status, method and host/route¹ | host, route, status |
 | Last observed latency | Average and max of the last-seen request time | host, route, status |
 | HTTPS interception | Share of outbound traffic that is visible (plain HTTP + intercepted HTTPS) vs opaque `CONNECT` tunnels; a ranked table of tunnelled `host:port`s to intercept next | — |
 | Payload sizes | Average and max of request and response sizes; p50 / p95 / p99 from the size histograms¹ | host, route, status |
@@ -41,9 +41,10 @@ filter lives on the tab that uses it.
 | L4 streams | Session status table, sessions per destination, session duration and connect time (avg, max, p99, p95, p50), throughput both legs, time to first byte, open sessions per destination | status (L4 codes) |
 | Exporter health | `nginx_metric_errors_total`, pods reporting, series per pod, distinct routes / hosts / callers over time: catches a sanitizer gap before it hurts your Prometheus | — |
 
-¹ The request/response size and connection histograms are off by default; those
-panels show *No data* until you turn them on, e.g.
-`METRICS_CONFIG="http.metric_request_size_histogram=true;http.metric_response_size_histogram=true"`.
+¹ Every histogram is off by default; panels built on one show *No data* until
+you turn it on. That includes the Summary p95, the whole Latency percentiles
+tab and the L4 percentiles, e.g.
+`METRICS_CONFIG="http.metric_latency_hist=true;stream.metric_upstream_connect_time_hist=true"`.
 See the [metrics reference](../docs/metrics-reference.md).
 
 `/metrics` and empty routes are excluded from the route-based panels.

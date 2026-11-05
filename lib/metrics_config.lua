@@ -10,7 +10,7 @@
 -- require rebuilding the nginx image -- see examples/openresty-sidecar/.
 -- For a simple value (a switch, a number, a name) there's no need to copy the
 -- file at all: set METRICS_CONFIG on the container instead, e.g.
--- METRICS_CONFIG="http.metric_latency_hist=false" (lib/config_env.lua).
+-- METRICS_CONFIG="http.metric_latency_hist=true" (lib/config_env.lua).
 --
 -- Consumed by lib/http_metrics.lua (the `http` and `apps` tables) and
 -- lib/stream_metrics.lua (the `stream` and `apps.stream` tables), both via
@@ -80,7 +80,10 @@ return {
 
         metric_requests                      = true,
         metric_latency                       = true,
-        metric_latency_hist                  = true,
+        -- Histograms are off by default: each one is (buckets + 3) series per
+        -- label combination, the largest share of the shared dict and of
+        -- scrape size. Turn on the ones you query percentiles from.
+        metric_latency_hist                  = false,
         metric_request_size                  = true,
         metric_request_size_histogram        = false,
         metric_response_size                 = true,
@@ -141,13 +144,21 @@ return {
         ptr_forget_after         = 300,   -- seconds without a request before an IP stops being refreshed and is dropped; a returning caller is resolved inline again
         ptr_sync_timeout         = 100,   -- ms; a never-seen IP is resolved inline with this timeout (nil = always background)
         ptr_ignore_services      = { "%-metrics$", "%-headless$" },  -- Lua patterns; Services passed over when an IP has several PTR records
-        probe_default_service    = "health-probe",  -- fallback for unresolved dynamic-range addresses (often kubelet probes)
+        -- kubelet probes connect from the node's own IP, which sits in a node
+        -- range (often one of static_ranges) and would be labelled as that
+        -- range. Every kubelet probe sends `User-Agent: kube-probe/<version>`,
+        -- so those requests are labelled probe_default_service /
+        -- probe_default_namespace instead, whatever their source IP. No path
+        -- is assumed.
+        probe_by_user_agent      = true,
+        probe_user_agent_prefix  = "kube-probe/",
+        probe_default_service    = "health-probe",  -- kubelet probes, and unresolved dynamic-range addresses
         probe_default_namespace  = "default",         -- namespace paired with probe_default_service
         waypoint_service_name    = "waypoint",  -- must match the Service name your mesh's waypoint Gateway creates
     },
 
     -- HTTPS interception (lib/tls_intercept.lua + the :3129 server in
-    -- docker/conf.d/intercept.conf). Only consulted once interception is
+    -- docker/optional/intercept.conf). Only consulted once interception is
     -- switched on with INTERCEPT_TLS=on (lib/intercept.lua); the CA below must
     -- be mounted into the nginx container ONLY (never the app).
     intercept = {
@@ -171,14 +182,14 @@ return {
         metric_connections_total           = true,
         metric_bytes_sent                  = true,
         metric_bytes_received              = true,
-        metric_session_duration            = true,   -- histogram
+        metric_session_duration            = false,  -- histogram; off by default like every histogram
         metric_session_duration_gauge      = true,    -- gauge, last value (companion to the histogram)
         metric_upstream_connect_time_gauge = true,    -- gauge, last value
-        metric_upstream_connect_time_hist  = true,    -- histogram
+        metric_upstream_connect_time_hist  = false,   -- histogram
         metric_connections_active          = true,
         metric_upstream_bytes_sent         = true,
         metric_upstream_bytes_received     = true,
-        metric_upstream_first_byte_time    = true,
+        metric_upstream_first_byte_time    = false,   -- histogram
 
         label_destination    = true,
         label_upstream_addr  = true,

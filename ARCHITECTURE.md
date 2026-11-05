@@ -24,8 +24,9 @@ library:
   leg at the app container. `metrics_config.lua` is plain data — the
   one file here you're meant to edit per deployment.
 - **`docker/`** — the image: `nginx.conf`, `conf.d/default.conf` (the inbound
-  and outbound servers, `/metrics`), `conf.d/intercept.conf` (https
-  interception) — the reference config for every feature.
+  and outbound servers, `/metrics`), `optional/intercept.conf` (https
+  interception, loaded only with `INTERCEPT_TLS=on`) and `entrypoint.sh` —
+  the reference config for every feature.
 - **`examples/openresty-sidecar/`** — a runnable, mock-data Kubernetes
   example: the app + sidecar Deployment with inbound, outbound and stream on,
   `stream.conf`, Service/ServiceMonitor, kustomization.
@@ -48,7 +49,7 @@ guides: inbound, outbound, https interception (builds on outbound), stream.
 | Gauge expiry | `gauge_expiry.lua` | Only `:start()` |
 | Per-app metrics toggle | `app_toggle.lua` | No |
 | inbound + outbound metrics | `http_metrics.lua` + `docker/conf.d/default.conf` | Yes |
-| https interception | `intercept.lua` + `tls_intercept.lua` + `docker/conf.d/intercept.conf` | Yes |
+| https interception | `intercept.lua` + `tls_intercept.lua` + `docker/optional/intercept.conf` | Yes |
 | stream (TCP/UDP) metrics | `stream_metrics.lua` + `stream.conf` | Yes |
 | Everything's config | `metrics_config.lua` | No — just data |
 
@@ -192,7 +193,7 @@ a bare `tunnel_pass;`.
 
 When `CONNECT host:port` isn't enough, the sidecar can decrypt outbound HTTPS:
 `:3128` hands an intercepted CONNECT to a loopback terminator
-(`127.0.0.1:3129`, `docker/conf.d/intercept.conf`), which mints a per-SNI leaf
+(`127.0.0.1:3129`, `docker/optional/intercept.conf`), which mints a per-SNI leaf
 cert signed by a CA you mount (`lib/tls_intercept.lua`), records the decrypted
 request with the same `record()`, and re-originates to the real destination
 over **verified** TLS (`proxy_ssl_verify on` against
@@ -289,7 +290,9 @@ Inside the image:
   transparent default: inbound on `:80` reverse-proxies to
   `127.0.0.1:$APP_PORT` (default `8080`) without touching the request,
   outbound listens on `127.0.0.1:3128`, and `:9145` serves `/metrics`,
-  `/nginx_status` and `/healthz`. https interception is baked in and off.
+  `/nginx_status` and `/healthz`. https interception ships in the image but
+  is only loaded when the container starts with `INTERCEPT_TLS=on` (the
+  entrypoint links it into `conf.d/`). Access logs and histograms are off.
 - stream is off. Drop a file containing
   `stream { include /etc/nginx/stream.d/*.conf; }` into `/etc/nginx/main.d/`
   and your `stream.conf` into `/etc/nginx/stream.d/` to turn it on.
