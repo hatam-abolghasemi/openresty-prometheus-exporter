@@ -133,7 +133,8 @@ label names the commit it was built from.
 GitHub **Releases** (`vX.Y.Z`) are separate — they mark this project's own
 milestones, independent of the OpenResty version. The image tag answers "which
 OpenResty am I on?"; the release answers "which version of the exporter's
-capabilities is this?".
+capabilities is this?". Each release's notes are its section of the
+[changelog](CHANGELOG.md), including what to check when upgrading.
 
 ## Built on
 

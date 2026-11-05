@@ -1,7 +1,60 @@
 # Changelog
 
-Dated entries for this project's own code. The vendored library under
-`vendor/nginx-lua-prometheus/` has its own `CHANGELOG.md`.
+This project's own code, grouped by release. Each release lists its dated
+entries, newest first. The vendored library under `vendor/nginx-lua-prometheus/`
+has its own `CHANGELOG.md`.
+
+A release's section here is also its GitHub Release notes: pushing a `vX.Y.Z`
+tag publishes the `## vX.Y.Z` section below (`.github/scripts/release-notes.sh`).
+Image tags follow docker-openresty, not these versions; see
+[docs/images.md](docs/images.md).
+
+New entries go under **Unreleased** until the next tag.
+
+## Unreleased
+
+Nothing yet.
+
+## v1.1.0 — 2026-11-05
+
+Leaner per-pod defaults, configuration through one env var, caller attribution
+that holds up under load, and a dashboard for every metric.
+
+### Upgrading from v1.0.0
+
+Several defaults changed. Check these before rolling the new image out:
+
+- **Every histogram is off.** Percentile queries and the dashboard's p50/p95/p99
+  panels show nothing until you turn the ones you use back on, e.g.
+  `METRICS_CONFIG="http.metric_latency_hist=true"`. Counters and last-value
+  gauges are unchanged.
+- **https interception is loaded by the image's entrypoint**, and only when the
+  container starts with `INTERCEPT_TLS=on`. If your Deployment sets `command:`
+  on the nginx container, remove it (or start it with
+  `/usr/local/bin/openresty-exporter-entrypoint`), or interception stays off.
+  `intercept.conf` moved from `conf.d/` to `optional/`.
+- **No access log** and **`worker_connections 1024`** (was 4096) in the image's
+  `nginx.conf`. A mounted `nginx.conf` keeps its own values.
+- **Kubelet probes** (`User-Agent: kube-probe/…`) are labelled
+  `source_service="health-probe"`, `source_namespace="default"`, whatever their
+  source IP.
+- **Settings renamed or retuned** in `metrics_config.lua`: `ptr_cache_ttl` is
+  gone (PTR answers are now kept until replaced; see `ptr_refresh_interval`,
+  `ptr_forget_after`, `ptr_sync_timeout`), `ptr_dns_timeout` 200 → 2000 ms (it
+  no longer runs on the request path), `expiry_window` 10 → 15 s. If you mount
+  your own `metrics_config.lua`, re-copy it from this release and re-apply your
+  values, or new settings will be missing.
+
+### Highlights
+
+- `METRICS_CONFIG` env var overrides simple config values without mounting a file.
+- `nginx_connection_slots_limit` metric; slot usage vs limit on the dashboard.
+- PTR lookups moved off the request path, refreshed in the background.
+- Intercepted HTTPS re-originates over pooled, per-host keep-alive connections.
+- Grafana dashboard covering every metric, incl. HTTPS interception and exporter
+  health tabs.
+- `latest` is the alpine flavor; `docs/images.md` is generated from the registry;
+  failed image runs are retried.
 
 ### 2026-11-05
 
@@ -185,7 +238,7 @@ not, are now off until asked for.
 - **Failed image runs are retried**: `retry.yml` re-runs the failed jobs up to
   2 times.
 
-### 2026-10-21
+### 2026-10-21 (after v1.0.0)
 
 - **Grafana dashboard** in [`grafana/`](grafana/): a v2-schema dashboard
   (Grafana 12+) with one tab per area — Summary, Request breakdown, Latency
@@ -193,6 +246,14 @@ not, are now off until asked for.
   Dashboard-wide filters are only data source and namespace; host, route and
   status live on the tabs that use them (L4 streams lists stream status codes).
   Linked from the README and the docs index.
+
+## v1.0.0 — 2026-10-21
+
+First release: inbound and outbound L7 metrics, caller identity, https
+interception, L4 stream metrics, one image per docker-openresty release.
+
+### 2026-10-21
+
 - **Every docker-openresty flavor, same tags.** The image workflow no longer
   builds only Alpine: for each release it reads the flavors and platforms
   upstream published on Docker Hub (alpine, alpine-slim, alpine-apk,

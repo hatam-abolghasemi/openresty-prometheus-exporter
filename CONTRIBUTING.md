@@ -65,8 +65,10 @@ mismatch.
   to be testable without nginx; add cases to `tests/lib_test.lua`.
 - **Docs move with the code.** Update the feature guide, `docs/metrics-reference.md`
   for new metrics or labels, and the dashboard if it should show them.
-- **One dated entry in [CHANGELOG.md](CHANGELOG.md)** describing what changed and
-  why, in the style of the existing entries.
+- **One dated entry in [CHANGELOG.md](CHANGELOG.md)**, under **Unreleased**,
+  describing what changed and why, in the style of the existing entries. A
+  release moves those entries under its `## vX.Y.Z` heading, which becomes the
+  GitHub Release notes.
 
 ## Pull requests
 
