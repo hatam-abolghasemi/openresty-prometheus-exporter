@@ -13,7 +13,14 @@ New entries go under **Unreleased** until the next tag.
 
 ## Unreleased
 
-Nothing yet.
+### 2026-11-05
+
+- **FAQ and design decisions.** New `docs/faq.md`: short answers on how this
+  compares with Istio, OpenTelemetry SDKs, eBPF agents and access logs, the
+  sidecar choice, failure modes, latency, caller identity and its gaps, route
+  sanitizing, why no traces, histograms, egress coverage, cost and operations.
+  New `docs/design-decisions.md` holds the reasoning and trade-offs behind each
+  answer. Linked from the README and the docs index. No code change.
 
 ## v1.1.0 — 2026-11-05
 

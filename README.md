@@ -97,6 +97,7 @@ and L4 streams, one tab each.
 ## Documentation
 
 - **[Documentation index](docs/README.md)** — all guides, start here
+- **[FAQ](docs/faq.md)** — why not Istio, OpenTelemetry or eBPF, limits, costs; the reasoning and trade-offs in [design decisions](docs/design-decisions.md)
 - **Features** — [inbound](docs/inbound.md) · [outbound](docs/outbound.md) · [https interception](docs/https-interception.md) · [stream](docs/stream.md) · [own nginx](docs/standalone-nginx.md)
 - **[Images](docs/images.md)** — current release, tags per flavor, pull commands
 - **[Metrics reference](docs/metrics-reference.md)** — every metric and label, with PromQL

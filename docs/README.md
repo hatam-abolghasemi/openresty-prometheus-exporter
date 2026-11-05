@@ -33,6 +33,8 @@ goes through outbound.
 
 | Doc | Contents |
 |---|---|
+| [FAQ](faq.md) | Short answers: positioning against Istio, OpenTelemetry and eBPF, architecture, labels, coverage limits, cost, operations |
+| [Design decisions](design-decisions.md) | The reasoning behind the FAQ: each choice, what it gives up, and when another tool fits better |
 | [Modules](modules.md) | Every `lib/` module: purpose, why it's shaped that way, config keys, invariants, how to change/extend/test it safely |
 | [Images](images.md) | Current release, every flavor's tags and platforms, pull commands by tag and digest (generated) |
 | [Metrics reference](metrics-reference.md) | Every metric and label, cardinality notes, example PromQL |
