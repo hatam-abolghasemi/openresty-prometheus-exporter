@@ -20,7 +20,7 @@ New entries go under **Unreleased** until the next tag.
   sidecar choice, failure modes, latency, caller identity and its gaps, route
   sanitizing, why no traces, histograms, egress coverage, cost and operations.
   New `docs/design-decisions.md` holds the reasoning and trade-offs behind each
-  answer. Linked from the README and the docs index. No code change.
+  answer, including why OpenResty rather than stock nginx with the Lua module. Linked from the README and the docs index. No code change.
 
 ## v1.1.0 — 2026-11-05
 

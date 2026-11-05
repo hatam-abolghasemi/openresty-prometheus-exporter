@@ -55,6 +55,18 @@ nginx for OpenResty adds observability without adding a hop. For apps with no
 nginx, this is one more proxy, like any other sidecar.
 [More](design-decisions.md#why-openresty)
 
+### Why OpenResty and not stock nginx with the Lua module?
+
+The vendored Prometheus library runs on stock nginx with `lua-nginx-module`,
+but this project needs more than that library: `lua-resty-core`, the DNS
+resolver, `lua-resty-openssl` and `ngx.ssl` for interception, the stream Lua
+module, all at versions that match each other and the nginx core. OpenResty
+ships that set released and tested together; building it yourself means
+redoing the pairing on every nginx upgrade, and the Lua module's own
+maintainers discourage it. Stock nginx's built-in scripting (njs) lacks the
+TLS and balancer hooks interception depends on. The cost: OpenResty's releases
+trail nginx mainline. [More](design-decisions.md#why-openresty-and-not-stock-nginx)
+
 ---
 
 ## Architecture

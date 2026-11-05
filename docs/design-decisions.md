@@ -84,6 +84,35 @@ additional proxy, and the comparison with any other sidecar (Envoy included)
 is on footprint and configuration model: this one needs no xDS or control
 plane, Envoy has richer L7 features.
 
+### Why OpenResty and not stock nginx
+
+The vendored [nginx-lua-prometheus](https://github.com/knyar/nginx-lua-prometheus)
+works on any nginx with `lua-nginx-module`. This project depends on more than
+that library, and that's what makes stock nginx the harder path:
+
+- **Matched versions.** `lua-nginx-module` needs `lua-resty-core` and
+  `lua-resty-lrucache` at matching versions, and LuaJIT (OpenResty maintains
+  its own branch). A dynamic module must be built against the exact nginx
+  version it loads into, so every nginx upgrade is a rebuild. The module's
+  own README discourages building it into nginx yourself.
+- **More libraries.** Caller identity uses `resty.dns.resolver`; https
+  interception uses `lua-resty-openssl` and `ngx.ssl`; stream needs
+  `ngx_stream_lua_module`. OpenResty bundles all of them.
+- **Distro packages lag.** Packages like Debian's `libnginx-mod-http-lua`
+  follow the distro's nginx and Lua module versions, not the ones this code is
+  tested against.
+- **njs isn't a substitute.** Stock nginx's JavaScript module has shared
+  dictionaries and timers, but no per-handshake TLS hook, no per-request
+  upstream balancer and no certificate generation, so https interception and
+  pooled re-origination can't be built on it.
+- **One tested artifact.** The image is rebuilt and smoke-tested for every
+  docker-openresty release; a self-built nginx + module is tested by you.
+
+The trade-off: OpenResty releases follow nginx mainline with a delay, so new
+nginx features arrive late. Native CONNECT (`tunnel_pass`) was only usable once
+OpenResty moved to nginx 1.31. Running on your own nginx stays possible
+([standalone nginx](standalone-nginx.md)); it's just not the supported path.
+
 ---
 
 ## Sidecar vs gateway vs DaemonSet
