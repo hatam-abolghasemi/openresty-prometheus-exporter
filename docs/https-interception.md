@@ -65,7 +65,10 @@ app ──CONNECT api:443──▶ :3128 ──first bytes?──┬─ TLS ─�
    call and forwards it with `grpc_pass`. No CA is involved — there is nothing
    to decrypt.
 6. Every decoded call is recorded once, on its terminator; the outer `CONNECT`
-   is not recorded again. For gRPC, `route` is the method path, kept as is,
+   is not recorded again. The `protocol` label says what it was — `https`,
+   `grpcs` (gRPC over TLS), `grpc` (plaintext) — and `tunnel` marks a CONNECT
+   that wasn't decoded, so `sum by (protocol)` on outbound shows how much egress
+   is still opaque. For gRPC, `route` is the method path, kept as is,
    and `status` is `grpc_<code>` from `grpc-status` (`grpc_0` OK, `grpc_14`
    UNAVAILABLE, …); a non-200 HTTP status (nginx or transport failure) is kept
    as is.

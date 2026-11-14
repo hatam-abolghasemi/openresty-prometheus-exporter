@@ -29,6 +29,11 @@ New entries go under **Unreleased** until the next tag.
   `:3130`). Names that don't resolve as given are retried with each `search`
   domain from `/etc/resolv.conf`, so short Service names (`svc.namespace`)
   resolve as they do for the app; full names still take one query.
+- **New `protocol` label** on HTTP request metrics: `http`, `https`, `grpc`,
+  `grpcs` or `tunnel` (a CONNECT that wasn't decoded), taken from what nginx saw
+  — the scheme, gRPC by content type — with nothing configured. On by default
+  (`http.label_protocol`); it adds one label to every request series, so
+  existing series are replaced once on upgrade.
 - New `intercept.tunnel_connect_timeout` (10s) and `intercept.tunnel_idle_timeout`
   (300s) for the detecting tunnel.
 - `:3129` request bodies are no longer capped at nginx's 1 MB default

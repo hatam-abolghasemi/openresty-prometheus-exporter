@@ -113,6 +113,7 @@ return {
         label_mode             = true,   -- "0" = inbound, "1" = outbound (incl. https interception)
         label_source_service   = true,
         label_source_namespace = true,
+        label_protocol         = true,   -- http, https, grpc, grpcs, or tunnel (a CONNECT not decoded); from what nginx saw, nothing configured
 
         -- passed straight through to route_sanitizer.sanitize()
         sanitize = {

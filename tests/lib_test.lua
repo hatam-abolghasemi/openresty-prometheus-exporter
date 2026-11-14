@@ -635,6 +635,16 @@ do
         eq(ic.is_grpc("application/json"), false); eq(ic.is_grpc(nil), false)
     end)
 
+    test("protocol: undecoded CONNECT is a tunnel", function() eq(ic.protocol("CONNECT", "http", nil), "tunnel") end)
+    test("protocol: plain and TLS HTTP", function()
+        eq(ic.protocol("GET", "http", nil), "http"); eq(ic.protocol("POST", "https", "application/json"), "https")
+    end)
+    test("protocol: gRPC plaintext and over TLS", function()
+        eq(ic.protocol("POST", "http", "application/grpc"), "grpc")
+        eq(ic.protocol("POST", "https", "application/grpc+proto"), "grpcs")
+    end)
+    test("protocol: gRPC-Web stays http(s)", function() eq(ic.protocol("POST", "https", "application/grpc-web"), "https") end)
+
     test("should: only when connect_tunnel marked it", function()
         eq(ic.should(), false)
         ngx.ctx.intercepted = true

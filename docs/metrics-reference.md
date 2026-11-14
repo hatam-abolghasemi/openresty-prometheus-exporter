@@ -20,6 +20,7 @@ individually toggleable):
 |---|---|---|---|
 | `method` | `GET`, `POST`, `CONNECT` | request method | on |
 | `route` | `/orders/$param` | request URI, [sanitized](modules.md#route_sanitizerlua) | on |
+| `protocol` | `http`, `https`, `grpc`, `grpcs`, `tunnel` | what the request was, from what nginx saw: the scheme it arrived on, gRPC by content type, `tunnel` for a CONNECT not decoded | on |
 | `status` | `200`, `404`, `503`, `grpc_0`, `grpc_14` | response status; `grpc_<code>` (from `grpc-status`) for outbound gRPC decoded by [interception](https-interception.md) | on |
 | `host` | `api.internal`, `kubernetes`, `$ip` | `Host`, [classified](modules.md#host_classifierlua) | on |
 | `mode` | `0` inbound · `1` outbound | which leg (`$request_mode`) | on |

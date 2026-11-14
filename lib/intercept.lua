@@ -137,4 +137,15 @@ function _M.is_grpc(content_type)
     return ct == "application/grpc" or ct:find("^application/grpc[+;%s]") ~= nil
 end
 
+-- The `protocol` label: what the request was, from what nginx saw -- nothing
+-- configured. A CONNECT recorded as such was not decoded: "tunnel". Otherwise
+-- the scheme it arrived on (https on :3129, http on :80, :3128 and :3130),
+-- with gRPC told apart by its content type: "grpcs" over TLS, "grpc" plaintext.
+function _M.protocol(method, scheme, content_type)
+    if method == "CONNECT" then return "tunnel" end
+    local tls = (scheme == "https")
+    if _M.is_grpc(content_type) then return tls and "grpcs" or "grpc" end
+    return tls and "https" or "http"
+end
+
 return _M

@@ -223,7 +223,8 @@ jobs:
           metrics=$(probe http://127.0.0.1:9145/metrics)
           echo "$metrics" | grep -E '^nginx_http_requests_total'
           echo "$metrics" | grep -q 'mode="0"'
-          echo "$metrics" | grep -q 'method="CONNECT".*mode="1"'
+          echo "$metrics" | grep -q 'method="CONNECT".*mode="1".*protocol="tunnel"'
+          echo "$metrics" | grep -q 'mode="0".*protocol="http"'
           echo "$metrics" | grep -q '^nginx_http_connections{state="active"'
           echo "$metrics" | grep -q 'source_service="health-probe",source_namespace="default"'
           # worker_connections (1024, docker/nginx.conf) x worker_processes (1)
@@ -306,7 +307,9 @@ jobs:
           echo "$metrics" | grep 'host="grpcbin"'
           echo "$metrics" | grep -q 'method="POST",route="/hello.HelloService/SayHello",status="grpc_0",host="grpcbin",mode="1"'
           echo "$metrics" | grep -q 'route="/grpcbin.GRPCBin/SpecificError",status="grpc_5"'
+          echo "$metrics" | grep -q 'route="/hello.HelloService/SayHello".*protocol="grpc"'
           echo "$metrics" | grep -q 'method="GET",route="/",status="200",host="example.com",mode="1"'
+          echo "$metrics" | grep -q 'host="example.com".*protocol="https"'
           if echo "$metrics" | grep -q 'method="CONNECT"'; then
             echo "::error::a decoded call was also recorded as a CONNECT"
             exit 1

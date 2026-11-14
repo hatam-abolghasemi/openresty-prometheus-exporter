@@ -56,6 +56,7 @@ end
 local REQUEST_LABELS = {
     "method", "route", "status", "client_subnet", "host",
     "app", "namespace", "mode", "source_service", "source_namespace",
+    "protocol",
 }
 
 local function label_enabled(name)
@@ -296,6 +297,7 @@ function _M.record()
         mode             = request_mode,
         source_service   = ngx.ctx.source_service,
         source_namespace = ngx.ctx.source_namespace,
+        protocol         = cfg.label_protocol and intercept.protocol(method, ngx.var.scheme, ngx.var.content_type) or nil,
     }
 
     if metric_requests           then metric_requests:inc(1, labels)             end
