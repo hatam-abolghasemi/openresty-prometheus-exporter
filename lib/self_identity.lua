@@ -94,6 +94,13 @@ function _M:is_resolved()
   return self.resolved
 end
 
+-- This pod's own IPv4 once found (the first refresh() reads it from
+-- /etc/hosts, before and independently of the PTR lookup), else nil. Safe in
+-- every phase.
+function _M:own_ip()
+  return self.ip
+end
+
 local function trim(s) return s and s:match("^%s*(.-)%s*$") end
 
 function _M:find_ip()

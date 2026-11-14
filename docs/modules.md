@@ -176,9 +176,13 @@ lose the signal you wanted.
 **Why:** the `Host` header is fully client-controlled, so using it raw is a
 cardinality and spoofing risk.
 
-**API:** `classify(host, cluster_ip_prefix) → string` — returns `"localhost"`,
-`"kubernetes"` (when the host is an IP under `cluster_ip_prefix`), a generic
-`"$ip"`, or the real hostname unchanged.
+**API:** `classify(host, cluster_ip_prefix, own_ip, own_name) → string` —
+returns `"localhost"`, the pod's own discovered service name when the host is
+its own IP (`own_ip`/`own_name` come from `self_identity`, and are only passed
+once discovery has succeeded), `"kubernetes"` (another IP under
+`cluster_ip_prefix`), a generic `"$ip"`, or the real hostname unchanged. So a
+kubelet probe, which calls the pod by IP, shows the same host as callers that go
+through the Service.
 
 **Changing it safely:** `cluster_ip_prefix` must end in `.` and match your pod/
 service CIDR (e.g. `"10.233."`). Get it wrong and internal IPs fall into the

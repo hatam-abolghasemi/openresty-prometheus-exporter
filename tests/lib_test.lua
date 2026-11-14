@@ -53,6 +53,17 @@ test("host: other ip", function() eq(host_classifier.classify("8.8.8.8:443", "10
 test("host: localhost", function() eq(host_classifier.classify("localhost:80", "10.233."), "localhost") end)
 test("host: ipv6", function() eq(host_classifier.classify("::1", "10.233."), "$ip") end)
 test("host: name passes", function() eq(host_classifier.classify("api.example.com", "10.233."), "api.example.com") end)
+test("host: own pod ip is its own service", function()
+    eq(host_classifier.classify("10.233.5.6", "10.233.", "10.233.5.6", "checkout"), "checkout")
+    eq(host_classifier.classify("10.233.5.6:80", "10.233.", "10.233.5.6", "checkout"), "checkout")
+end)
+test("host: another cluster ip stays kubernetes", function()
+    eq(host_classifier.classify("10.233.9.9", "10.233.", "10.233.5.6", "checkout"), "kubernetes")
+end)
+test("host: no discovered name, no change", function()
+    eq(host_classifier.classify("10.233.5.6", "10.233.", "10.233.5.6", nil), "kubernetes")
+    eq(host_classifier.classify("10.233.5.6", "10.233.", nil, "checkout"), "kubernetes")
+end)
 
 local client_subnet = require("client_subnet")
 test("subnet: private /24", function() eq(client_subnet.mask("10.233.4.17"), "10.233.4.0") end)
@@ -118,6 +129,17 @@ test("identity: pod ip from /etc/hosts", function()
     local hosts = "127.0.0.1 localhost\n10.233.5.6\tapp-7d9f-abc\n"
     eq(self_identity.pod_ip_from_hosts(hosts, "app-7d9f-abc"), "10.233.5.6")
     eq(self_identity.pod_ip_from_hosts(hosts, "other"), nil)
+end)
+test("self: own ip known before PTR resolves", function()
+    local files = { ["/etc/hosts"] = "127.0.0.1 localhost\n10.233.5.6 app-7d9f-abc\n" }
+    local ident = self_identity.new{
+        resolver = { resolve_ptr = function() return nil end },
+        fallback_service = "unknown", fallback_namespace = "shop",
+        read_file = function(p) return files[p] end, hostname = "app-7d9f-abc",
+    }
+    eq(ident:own_ip(), nil)
+    eq(ident:refresh(), false)
+    eq(ident:own_ip(), "10.233.5.6"); eq(ident:is_resolved(), false)
 end)
 
 local slots = require("connection_slots")

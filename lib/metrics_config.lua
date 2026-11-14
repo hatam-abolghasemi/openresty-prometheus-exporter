@@ -154,7 +154,7 @@ return {
         probe_by_user_agent      = true,
         probe_user_agent_prefix  = "kube-probe/",
         probe_default_service    = "health-probe",  -- kubelet probes, and unresolved dynamic-range addresses
-        probe_default_namespace  = "default",         -- namespace paired with probe_default_service
+        probe_default_namespace  = "kubernetes",      -- namespace paired with probe_default_service: the kubelet is the cluster itself, not a namespace
         waypoint_service_name    = "waypoint",  -- must match the Service name your mesh's waypoint Gateway creates
     },
 

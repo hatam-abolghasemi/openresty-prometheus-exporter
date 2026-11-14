@@ -50,6 +50,16 @@ local function own()
     return cfg.app, cfg.namespace
 end
 
+-- This pod's own IP and *discovered* service name, for host_classifier: a Host
+-- that is the pod's own IP is labelled with the name callers use for it. Both
+-- nil until discovery has succeeded (or with discover_identity off), so a
+-- fallback name is never put in the host label.
+local function own_host()
+    if not (ident and ident:is_resolved()) then return nil, nil end
+    local svc = ident:get()
+    return ident:own_ip(), svc
+end
+
 -- The request label set, in order. Schema and values are both built from this
 -- one list, so they can't drift apart (a mismatch either fails with
 -- "incorrect label count" or, worse, files values under the wrong names).
@@ -293,7 +303,7 @@ function _M.record()
         route            = route,
         status           = status,
         client_subnet    = cfg.label_client_subnet and client_subnet.mask(ngx.var.http_x_forwarded_for or ngx.var.remote_addr) or nil,
-        host             = cfg.label_host and host_classifier.classify(ngx.var.host, cfg.cluster_ip_prefix) or nil,
+        host             = cfg.label_host and host_classifier.classify(ngx.var.host, cfg.cluster_ip_prefix, own_host()) or nil,
         mode             = request_mode,
         source_service   = ngx.ctx.source_service,
         source_namespace = ngx.ctx.source_namespace,

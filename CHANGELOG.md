@@ -34,6 +34,13 @@ New entries go under **Unreleased** until the next tag.
   — the scheme, gRPC by content type — with nothing configured. On by default
   (`http.label_protocol`); it adds one label to every request series, so
   existing series are replaced once on upgrade.
+- **Kubelet probes are labelled `kubernetes.health-probe`** (`probe_default_namespace`
+  default `default` → `kubernetes`): the kubelet belongs to the cluster, not to
+  the `default` namespace. Also applies to unresolved dynamic-range addresses.
+- **A `Host` that is the pod's own IP is labelled with the pod's own service**
+  (discovered by `self_identity`) instead of `kubernetes`, so kubelet probes and
+  direct-to-pod callers show the same host as callers using the Service. Until
+  discovery succeeds, or with `discover_identity` off, it stays `kubernetes`.
 - New `intercept.tunnel_connect_timeout` (10s) and `intercept.tunnel_idle_timeout`
   (300s) for the detecting tunnel.
 - `:3129` request bodies are no longer capped at nginx's 1 MB default

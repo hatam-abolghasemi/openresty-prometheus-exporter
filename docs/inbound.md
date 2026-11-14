@@ -129,7 +129,8 @@ this order:
 
 0. Kubelet health probes (`User-Agent: kube-probe/…`) are labelled
    `probe_default_service` / `probe_default_namespace` (`health-probe` /
-   `default`) and nothing else is looked up. A probe connects from its node's
+   `kubernetes` — the kubelet belongs to the cluster, not to a namespace) and
+   nothing else is looked up. A probe connects from its node's
    IP, which would otherwise be classified by the node's subnet. Off with
    `http.probe_by_user_agent=false`.
 1. A static table of known internal subnets (`static_ranges` in

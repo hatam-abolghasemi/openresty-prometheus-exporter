@@ -226,7 +226,7 @@ jobs:
           echo "$metrics" | grep -q 'method="CONNECT".*mode="1".*protocol="tunnel"'
           echo "$metrics" | grep -q 'mode="0".*protocol="http"'
           echo "$metrics" | grep -q '^nginx_http_connections{state="active"'
-          echo "$metrics" | grep -q 'source_service="health-probe",source_namespace="default"'
+          echo "$metrics" | grep -q 'source_service="health-probe",source_namespace="kubernetes"'
           # worker_connections (1024, docker/nginx.conf) x worker_processes (1)
           echo "$metrics" | grep -Eq '^nginx_connection_slots_limit\{.*\} 1024$'
           echo "$metrics" | grep -qx 'nginx_metric_errors_total 0'

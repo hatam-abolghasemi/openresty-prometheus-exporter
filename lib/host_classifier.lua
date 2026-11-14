@@ -9,6 +9,7 @@
 --   local host_classifier = require("host_classifier")
 --   host_classifier.classify("10.233.4.12", "10.233.")  --> "kubernetes"
 --   host_classifier.classify("api.example.com", "10.233.") --> "api.example.com"
+--   host_classifier.classify("10.233.5.6", "10.233.", "10.233.5.6", "checkout") --> "checkout"
 
 local _M = {}
 
@@ -16,13 +17,23 @@ local _M = {}
 -- cluster's internal pod/service CIDR. IPs starting with this prefix are
 -- classified as "kubernetes"; any other IP literal (v4 or v6-shaped) becomes
 -- "$ip". Real domain names pass through unchanged.
-function _M.classify(host, cluster_ip_prefix)
+--
+-- own_ip / own_name (optional): this pod's own IP and its discovered service
+-- name (lib/self_identity.lua). A Host that is this pod's own IP -- kubelet
+-- probes, or a caller addressing the pod directly -- is the same destination
+-- callers reach through the Service, so it gets that name instead of the
+-- generic "kubernetes". Without a discovered name, nothing changes.
+function _M.classify(host, cluster_ip_prefix, own_ip, own_name)
   if not host then return host end
 
   local hostpart = host:match("^([^:]+):?%d*$") or host
 
   if hostpart == "127.0.0.1" or hostpart == "localhost" then
     return "localhost"
+  end
+
+  if own_ip and own_name and hostpart == own_ip then
+    return own_name
   end
 
   if hostpart:match("^%d+%.%d+%.%d+%.%d+$") then

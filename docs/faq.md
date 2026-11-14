@@ -129,7 +129,7 @@ IPv4-only. [More](design-decisions.md#caller-identity)
 
 Probes connect from the node's own IP, which says nothing about the caller.
 Requests with `User-Agent: kube-probe/…` are labelled `health-probe` /
-`default` instead, whatever their IP. No path is assumed. The header is
+`kubernetes` instead, whatever their IP. No path is assumed. The header is
 client-set, so this only affects a label, never access.
 
 ### How are routes kept from exploding cardinality?
