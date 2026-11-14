@@ -33,23 +33,23 @@ docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter:1.31.8.1-0-a
 Pinned by digest, for production:
 
 ```bash
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:e5fce8406394ea85512420a8f014776684230b36e101ef115c73b851a3691c88  # 1.31.8.1-0-alma
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:2e7f3bae78744d78d15f6c59c855eaa79c5162438b5e2ff11d727413c49db5d7  # 1.31.8.1-0-alpine
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:5673d92cd87efecc503c0dcb7860266963464d429dae8de6a3b6004391603f78  # 1.31.8.1-0-alpine-apk
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:96b6ed2569310c46851734d3d005624ee725ff5622f37d18e8755f7b11de614b  # 1.31.8.1-0-alpine-fat
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:447b743cd4875eb4d4764df381489fa20c679096ac29da296d110d222e31bb7b  # 1.31.8.1-0-alpine-slim
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:2c7c625abcb33da8337df0830645b971610ab794abf2ec3ccb57734f413a7be3  # 1.31.8.1-0-bookworm
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:f5eb3d6c04fd00da587551d806558b07594fc4656970083a5deab06be7574f23  # 1.31.8.1-0-alma
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:ab3f392a8fc18f12e031e426fb675e8ad736a7f2244ec663d0683b6db51b901a  # 1.31.8.1-0-alpine
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:bdbc027c1338e6a79599da5fa4e38522c936eea929f871c71713458ffe8c6de1  # 1.31.8.1-0-alpine-apk
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:cbf0a6da67377a4f55fe4d9af0a656585705acfe7d73ba90ebb58a1f8eb31c0e  # 1.31.8.1-0-alpine-fat
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:fb6eba9acd63d7c96fb7ca1ed0133eaf2b179e90c5f8f1f700c49dc41b0655ea  # 1.31.8.1-0-alpine-slim
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:f10d3e28b08d5b94f79ba79bf382ef2d6ace4cbb34864315adaa0aaefa471017  # 1.31.8.1-0-bookworm
 docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:3795839605d128d20b808e04384966336cce56f111663e271b137c8d8ed85f86  # 1.31.8.1-0-bookworm-buildpack
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:3bfbde01f5eb1c969de07886f62570c6b9d5281fd3798147fff0581ff615096e  # 1.31.8.1-0-bookworm-debug
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:7eb0a35d8fd980957d22ee800d6786474fe79159b98b5a6af33571447b67be62  # 1.31.8.1-0-bookworm-fat
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:3686f1f7064fbf8339732d26b4d9ed641df27d0cad4540564d01f66b9f7913bf  # 1.31.8.1-0-bookworm-valgrind
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:46286b38878ceb6cde4fb17034a83b8df61cbcfe6a1f8b8e9a6272e5a3189336  # 1.31.8.1-0-fedora
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:54d6dbd0d56f72b6686bfdd53843b4bb099516e1091025a69a3a64067a1bf488  # 1.31.8.1-0-fedora-rpm
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:cae9a231f3e5329ae8b092fa095b4dd0c11a8d31c881e511dfbf3c60ed9661be  # 1.31.8.1-0-jammy
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:7eddbd124efd99e379a22f54c8d973d3e3070e9e66a570cb7fbd4743e9b5fc20  # 1.31.8.1-0-noble
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:4bac0ce3e24a4838b2a9880db3be3738cb39ab207f2ad5d2584918de897d9b2d  # 1.31.8.1-0-resolute
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:a8b023bfe4988c391a9cf8b9c897565066917bc1572a0141237ca7033576869c  # 1.31.8.1-0-restyrepo
-docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:e71b83cce3779917f55378fd7a555e4b36410b4c3ba939254121c445d4ca8c8d  # 1.31.8.1-0-rocky
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:0874a3eec42d567c341e696198688530cc24e31d1332b0cc2145ce4958d62186  # 1.31.8.1-0-bookworm-debug
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:931379cb4891df2ff939cd202945c2660b10d90d232090e2c40d262f319e1fb3  # 1.31.8.1-0-bookworm-fat
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:5cdc9066df5e1c0b0d0b69316e230f9662174fdc45d1adf266b2efab9e1a21f2  # 1.31.8.1-0-bookworm-valgrind
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:dd01dcd91a3bb554f3c49600a87c19a3990c3f8db79b1b3895cd28b2e2df4d14  # 1.31.8.1-0-fedora
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:1ea06d8506d8340c1bcc3c31f1c481e852d4bedff621388f070882babf7cbdb5  # 1.31.8.1-0-fedora-rpm
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:c4da108463c746cac4045aec799a249aa0cfd2d00025f838974aa8ad03796885  # 1.31.8.1-0-jammy
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:6d959a8bf2e3f2ff128e83eb076660e7ae8047f45d8d9937817b1d68c351dd59  # 1.31.8.1-0-noble
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:724b972d719420bad309ed8f5da5b9cfcad3c22de5579c318457186d0e47a242  # 1.31.8.1-0-resolute
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:b98442358554e5f80f851fee16d8a34cd47e3ef7dd63e30b67f853d7ac7af895  # 1.31.8.1-0-restyrepo
+docker pull ghcr.io/hatam-abolghasemi/openresty-prometheus-exporter@sha256:321b2c3c8ebd82146f871b453ed66e4f950b385bca6af938c2fbf1be30f92bcb  # 1.31.8.1-0-rocky
 ```
 
 Older releases stay pullable under their `<release>-<flavor>` tags.
