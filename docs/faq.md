@@ -179,7 +179,9 @@ HTTPS shows as `CONNECT host:port` unless https interception is on.
 ### HTTP/2, gRPC, WebSocket?
 
 WebSocket upgrades pass through. The default inbound server speaks HTTP/1.1
-only, so h2c and gRPC aren't covered without your own config.
+only, so inbound h2c and gRPC aren't covered without your own config. Outbound
+gRPC is: with [https interception](https-interception.md) on, gRPC over TLS and
+plaintext gRPC are both decoded per method, with their gRPC status.
 
 ---
 

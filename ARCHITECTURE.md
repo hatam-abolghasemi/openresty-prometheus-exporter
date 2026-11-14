@@ -191,8 +191,14 @@ a bare `tunnel_pass;`.
 
 ### https interception (depends on outbound)
 
-When `CONNECT host:port` isn't enough, the sidecar can decrypt outbound HTTPS:
-`:3128` hands an intercepted CONNECT to a loopback terminator
+When `CONNECT host:port` isn't enough, the sidecar can decode what outbound
+tunnels carry. With interception on, `:3128` reads each tunnel's first bytes
+(`lib/connect_tunnel.lua`): TLS, on any port, goes to the TLS terminator below;
+the HTTP/2 preface (plaintext gRPC) goes to a second terminator on
+`127.0.0.1:3130` that records each call (`/package.Service/Method`,
+`grpc_<code>`) and forwards it with `grpc_pass`; anything else is tunnelled
+unchanged. The decision costs no wait, since TLS and HTTP clients speak first.
+A TLS tunnel goes to a loopback terminator
 (`127.0.0.1:3129`, `docker/optional/intercept.conf`), which mints a per-SNI leaf
 cert signed by a CA you mount (`lib/tls_intercept.lua`), records the decrypted
 request with the same `record()`, and re-originates to the real destination
@@ -203,10 +209,12 @@ sees CONNECTs that reached `:3128`, it does nothing without outbound.
 
 Off unless `INTERCEPT_TLS=on` and a CA keypair is mounted at
 `/etc/nginx/intercept/ca.crt` + `ca.key` (nginx only — the app gets the cert,
-never the key). `INTERCEPT_TLS_PORTS` (default `443`) and `INTERCEPT_BYPASS`
-(mTLS / cert-pinned hosts) narrow it. `intercept.should()` is the single
-decision for both routing and counting, so an intercepted call is recorded once
-(decrypted), never also as its outer CONNECT.
+never the key). `INTERCEPT_BYPASS` (mTLS / cert-pinned hosts) narrows it; those
+hosts, and everything when it's off, keep nginx's native `tunnel_pass`. The TLS
+terminator speaks HTTP/2 too, so gRPC over TLS is decrypted and forwarded with
+`grpc_pass`. `connect_tunnel` routes each CONNECT once and marks it, and
+`record()` skips a marked CONNECT, so a decoded call is recorded once, never also
+as its outer CONNECT.
 
 The CA is a trust anchor — whoever holds its key can impersonate any site to
 every pod that trusts it. The per-runtime trust setup (PHP, .NET, Node, Go,

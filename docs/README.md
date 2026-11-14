@@ -25,7 +25,7 @@ goes through outbound.
 |---|---|---|
 | [inbound](inbound.md) | Request metrics for traffic **into** your app (method, route, status, timing, caller) | Run the image |
 | [outbound](outbound.md) | Metrics for calls **out** of your app (HTTP in full, HTTPS as `CONNECT host:port`) | `HTTP(S)_PROXY` on the app |
-| [https interception](https-interception.md) | Real method/route/status **inside** outbound HTTPS | outbound + `INTERCEPT_TLS=on` + a CA |
+| [https interception](https-interception.md) | Real method/route/status **inside** outbound HTTPS (any port) and gRPC (TLS or plaintext) | outbound + `INTERCEPT_TLS=on` + a CA |
 | [stream](stream.md) | TCP/UDP metrics (Redis, DB…) from the app's point of view | A `stream.conf` |
 | [Running on your own nginx](standalone-nginx.md) | The same features on an existing OpenResty / nginx-with-`lua-nginx-module`, no image | Config only |
 
@@ -48,7 +48,8 @@ goes through outbound.
    clients ──▶ :80 ──┤ inbound ──▶ your app                                │
                      │                │                                    │
                      │   app egress ──▶ :3128 outbound ──▶ internet        │
-                     │                       └─▶ :3129 https interception  │
+                     │                       ├─▶ :3129 TLS interception    │
+                     │                       └─▶ :3130 gRPC (h2c)          │
                      │                                                     │
                      │   app ──▶ :16379 etc ──▶ stream ──▶ redis, db, ...  │
                      │                                                     │
@@ -68,7 +69,8 @@ and `stream` modules.
   running this project's config. It needn't literally be a Kubernetes sidecar;
   it's any OpenResty in front of or beside your app.
 - **"the app"** — whatever you're observing: PHP-FPM, a Go binary, etc.
-- Ports: `:80` inbound · `:3128` outbound · `:3129` https interception
-  (internal) · `:9145` HTTP `/metrics` · `:9254` stream `/metrics`.
+- Ports: `:80` inbound · `:3128` outbound · `:3129` TLS interception and
+  `:3130` plaintext gRPC interception (internal) · `:9145` HTTP `/metrics` ·
+  `:9254` stream `/metrics`.
 - Config you edit lives in `lib/metrics_config.lua` (data only). Code you
   don't normally touch is the rest of `lib/`.

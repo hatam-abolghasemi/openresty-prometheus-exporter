@@ -380,20 +380,33 @@ drives both the `destination` label and the `apps.stream.<name>` toggle.
 
 ## `intercept.lua`
 
-**Why:** the per-CONNECT decision for https interception on the outbound proxy — intercept or tunnel
-straight through — kept out of nginx config so the only thing an app's
-`default.conf` carries is a one-line hook.
+**Why:** the interception switch and its pure decisions for the outbound proxy,
+kept out of nginx config so an app's `default.conf` carries only a short hook.
 
 **API**
-- `should() → bool` — true when the current CONNECT is on an intercepted port
-  and a non-bypassed host and `INTERCEPT_TLS=on`. Reads only vars that exist for
-  a CONNECT, so it's safe in any phase (including `log_by_lua`, where `record()`
-  uses it to count the intercepted call exactly once).
-- `upstream() → "host:port"` — the `tunnel_pass` target: `127.0.0.1:3129` when
-  intercepting, else the real `host:port` (identical to a bare `tunnel_pass;`).
+- `connect_mode() → "detect" | "tunnel" | "proxy"` — how `:3128` handles the
+  request: `"detect"` (a CONNECT relayed by `connect_tunnel`, interception on
+  and host not bypassed), `"tunnel"` (a CONNECT relayed by native
+  `tunnel_pass`), `"proxy"` (not a CONNECT). Exclusive values, because when
+  several nginx `if`s match, the last one wins.
+- `upstream() → "host:port"` — the real CONNECT target, as a bare
+  `tunnel_pass;` would use it.
+- `classify(bytes) → "tls" | "h2c" | "more" | nil` — what the tunnel's first
+  bytes are: a TLS record (`0x16 0x03`), the HTTP/2 preface, still a prefix of
+  one of those, or anything else.
+- `TERMINATOR` — `{ tls = "127.0.0.1:3129", h2c = "127.0.0.1:3130" }`.
+- `should() → bool` — true when `connect_tunnel` handed this CONNECT to a
+  terminator (`ngx.ctx.intercepted`); `record()` then skips the outer CONNECT
+  so the decoded call is counted exactly once.
+- `grpc_status(http_status, trailer_code, header_code) → string` — the
+  `status` label for a gRPC call: `grpc_<code>` when the HTTP status is 200 and
+  a code is present (trailer first, then header for a trailers-only error), else
+  the HTTP status unchanged.
+- `is_grpc(content_type) → bool` — `application/grpc` with or without a
+  `+proto`/`+json` suffix; gRPC-Web is not gRPC here.
 
-**Config source:** env vars `INTERCEPT_TLS` / `INTERCEPT_TLS_PORTS` (default
-`443`) / `INTERCEPT_BYPASS`, read **once per worker** and memoised — so a change
+**Config source:** env vars `INTERCEPT_TLS` / `INTERCEPT_BYPASS`, read **once
+per worker** and memoised — so a change
 needs a container restart. Interception is on only when `INTERCEPT_TLS=on`
 **and** the `:3129` terminator is loaded (`ngx.shared.ssl_mint_cache` exists,
 i.e. the entrypoint linked `intercept.conf` in at start); with the env var on
@@ -402,9 +415,35 @@ sending every CONNECT to a port nobody listens on. Those vars only reach Lua bec
 `docker/main.d/intercept-env.conf` declares them with `env`; off-image you must
 declare them yourself.
 
-**Invariant:** `should()` is the single source of truth for both routing (in
-`upstream()`) and counting (in `http_metrics.record()`). Don't fork that
-decision into two places or the intercepted call gets double- or un-counted.
+**Invariant:** the routing decision is made once, in `connect_tunnel`, which
+marks the request (`ngx.ctx.intercepted`) as it routes it; `should()` only
+reads that mark. Don't re-derive it elsewhere or the decoded call gets double-
+or un-counted.
+
+---
+
+## `connect_tunnel.lua`
+
+**Why:** nginx's `tunnel_pass` picks its destination when the CONNECT arrives,
+before the client has sent anything — too early to know what the tunnel
+carries. This module relays the CONNECT itself so the tunnel's first bytes can
+choose: TLS → `:3129`, HTTP/2 → `:3130`, anything else → the real target.
+
+**API:** `run()` — `content_by_lua` in `default.conf`'s `:3128` server when
+`$connect_mode = detect`. Sends `200 Connection Established` on the raw client
+socket, reads until `intercept.classify()` decides (2 bytes for TLS, up to the
+24-byte HTTP/2 preface), connects the chosen destination (the real target via
+the server's `resolver`, as `tunnel_pass` would), replays those bytes and then
+copies both directions with `receiveany()` until either side closes or idles
+out.
+
+**Config:** `intercept.tunnel_connect_timeout` (10s), `intercept.tunnel_idle_timeout`
+(300s) in `metrics_config.lua`.
+
+**Invariants:** no added wait — TLS and HTTP clients speak first, so the bytes
+are already there when read; nothing is buffered beyond one `receiveany()`
+chunk. Only used with interception on: off (or a bypassed host) keeps native
+`tunnel_pass`.
 
 ---
 
@@ -433,10 +472,14 @@ destination for every decrypted request — two extra round trips each, even for
 apps that reuse their own connection. This module keeps those connections alive.
 
 **API**
-- `resolve()` — access phase on `:3129`. Takes host and port from the `Host`
-  header (port defaults to `443`), resolves the host against
-  `intercept.dns_server`, caches the answer per worker for `dns_cache_ttl`
-  seconds, and stores the target in `ngx.ctx`. Unresolvable → `502`.
+- `resolve(default_port)` — access phase on `:3129` / `:3130`. Takes host and
+  port from the `Host` header (gRPC: `:authority`; port defaults to
+  `default_port`: `443` when omitted, `80` on `:3130`), resolves the host
+  against `intercept.dns_server`, caches the answer per worker for
+  `dns_cache_ttl` seconds, and stores the target in `ngx.ctx`. The name is tried
+  as given first, then with each `search` domain from `/etc/resolv.conf` (read
+  once per worker), so short Service names resolve as they would for the app.
+  Unresolvable → `502`.
 - `balance()` — `balancer_by_lua` of `upstream intercept_origin`. Sets the peer
   with the **hostname as the pool key and TLS name**, enables keepalive
   (`pool_idle_timeout`, `pool_max_requests`) and allows one retry, so a pooled

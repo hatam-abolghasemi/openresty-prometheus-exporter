@@ -13,6 +13,52 @@ New entries go under **Unreleased** until the next tag.
 
 ## Unreleased
 
+### 2026-11-14
+
+- **Interception decodes every HTTP tunnel, not just port 443.** With
+  `INTERCEPT_TLS=on`, each CONNECT is classified by the first bytes the app
+  sends into it (`lib/connect_tunnel.lua`): TLS on **any** port goes to `:3129`,
+  the HTTP/2 preface (plaintext gRPC) to a new `:3130` terminator, anything else
+  to the real target unchanged. No per-port or per-host configuration. Off, or
+  for a host in `INTERCEPT_BYPASS`, CONNECTs keep nginx's native `tunnel_pass`.
+- **gRPC is recorded per call**, over TLS (`:3129` now speaks HTTP/2 and
+  forwards `application/grpc` with `grpc_pass` over verified TLS) and plaintext
+  (`:3130`, h2c): `route="/package.Service/Method"` (not sanitized),
+  `status="grpc_<code>"` from `grpc-status`; a non-200 HTTP status is kept.
+- **`intercept_origin.lua`:** `resolve(default_port)` (443 unless given; 80 on
+  `:3130`). Names that don't resolve as given are retried with each `search`
+  domain from `/etc/resolv.conf`, so short Service names (`svc.namespace`)
+  resolve as they do for the app; full names still take one query.
+- New `intercept.tunnel_connect_timeout` (10s) and `intercept.tunnel_idle_timeout`
+  (300s) for the detecting tunnel.
+- `:3129` request bodies are no longer capped at nginx's 1 MB default
+  (`client_max_body_size 0`), as on the rest of the outbound path.
+
+### Upgrading
+
+- **`INTERCEPT_TLS_PORTS` is removed** (ignored if set): TLS is detected on
+  every port.
+- **`default.conf`'s `:3128` hook changed.** If you mount your own
+  `default.conf`, replace the CONNECT block with:
+  ```nginx
+  set_by_lua_block $connect_mode     { return require("intercept").connect_mode() }
+  set_by_lua_block $connect_upstream { return require("intercept").upstream() }
+  if ($connect_mode = detect) {
+      content_by_lua_block { require("connect_tunnel").run() }
+  }
+  if ($connect_mode = tunnel) {
+      tunnel_pass $connect_upstream;
+  }
+  ```
+- With interception on, an unreachable destination now closes the tunnel after
+  `200` instead of answering `502` (the tunnel's first bytes must be read before
+  the destination is chosen); the CONNECT metric still shows 502.
+- With interception on, TLS on non-443 ports is now decrypted too. A client that
+  tunnels non-HTTP TLS through the proxy (a database or broker over TLS) must be
+  listed in `INTERCEPT_BYPASS`.
+- `:3129` negotiates HTTP/2 with clients that offer it; destinations are still
+  reached over HTTP/1.1 (gRPC: HTTP/2).
+
 ### 2026-11-05
 
 - **FAQ and design decisions.** New `docs/faq.md`: short answers on how this

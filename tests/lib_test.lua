@@ -554,44 +554,139 @@ test("defaults: every histogram is off", function()
     end
 end)
 
--- intercept: hands CONNECTs to :3129 only when INTERCEPT_TLS=on AND
--- intercept.conf is loaded (its ssl_mint_cache dict is the marker).
+-- intercept.connect_mode: with INTERCEPT_TLS=on AND intercept.conf loaded (its
+-- ssl_mint_cache dict is the marker), CONNECTs go through connect_tunnel
+-- ("detect"); otherwise native tunnel_pass ("tunnel"); non-CONNECT is "proxy".
 do
-    local function run(env, loaded)
+    local function run(env, loaded, method, host)
         local saved_ngx, saved_getenv = _G.ngx, os.getenv
         local logs = {}
         _G.ngx = {
             ERR = 4,
             log = function(_, ...) logs[#logs + 1] = table.concat({ ... }) end,
             shared = loaded and { ssl_mint_cache = {} } or {},
-            var = { request_method = "CONNECT", host = "api.example.com", request_port = "443" },
+            var = { request_method = method or "CONNECT", host = host or "api.example.com", request_port = "8443" },
         }
-        os.getenv = function(name)
-            if name == "INTERCEPT_TLS" then return env end
-            return saved_getenv(name)
-        end
+        os.getenv = function(name) return env[name] end
         package.loaded["intercept"] = nil
-        local ok, a, b = pcall(function()
+        local ok, a, b, up = pcall(function()
             local ic = require("intercept")
-            return ic.upstream(), ic.upstream()
+            return ic.connect_mode(), ic.connect_mode(), ic.upstream()
         end)
         package.loaded["intercept"] = nil
         _G.ngx, os.getenv = saved_ngx, saved_getenv
         if not ok then error(a, 0) end
-        return a, b, logs
+        return a, b, up, logs
     end
-    test("intercept: off passes CONNECT through", function()
-        local up, _, logs = run(nil, false)
-        eq(up, "api.example.com:443"); eq(#logs, 0)
+    test("intercept: off uses native tunnel", function()
+        local m, _, up, logs = run({}, false)
+        eq(m, "tunnel"); eq(up, "api.example.com:8443"); eq(#logs, 0)
     end)
-    test("intercept: on and loaded goes to :3129", function()
-        local up, _, logs = run("on", true)
-        eq(up, "127.0.0.1:3129"); eq(#logs, 0)
+    test("intercept: on and loaded detects, any port", function()
+        local m, _, _, logs = run({ INTERCEPT_TLS = "on" }, true)
+        eq(m, "detect"); eq(#logs, 0)
     end)
-    test("intercept: on but not loaded passes through, logs once", function()
-        local up, again, logs = run("on", false)
-        eq(up, "api.example.com:443"); eq(again, "api.example.com:443"); eq(#logs, 1)
+    test("intercept: on but not loaded uses native tunnel, logs once", function()
+        local m, again, _, logs = run({ INTERCEPT_TLS = "on" }, false)
+        eq(m, "tunnel"); eq(again, "tunnel"); eq(#logs, 1)
         assert(logs[1]:find("isn't loaded", 1, true))
+    end)
+    test("intercept: bypassed host uses native tunnel", function()
+        eq(run({ INTERCEPT_TLS = "on", INTERCEPT_BYPASS = "mtls.example.com" }, true, "CONNECT", "mtls.example.com"), "tunnel")
+    end)
+    test("intercept: plain HTTP is proxy", function()
+        eq(run({ INTERCEPT_TLS = "on" }, true, "GET"), "proxy")
+        eq(run({}, false, "GET"), "proxy")
+    end)
+end
+
+-- intercept.classify / grpc_status / is_grpc / should: pure decisions.
+do
+    local saved_ngx = _G.ngx
+    _G.ngx = { shared = {}, var = {}, ctx = {} }
+    package.loaded["intercept"] = nil
+    local ic = require("intercept")
+    package.loaded["intercept"] = nil
+
+    local PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+    test("classify: TLS ClientHello", function() eq(ic.classify("\22\3\1\2\0"), "tls") end)
+    test("classify: TLS needs a 2nd byte", function() eq(ic.classify("\22"), "more") end)
+    test("classify: 0x16 then not 0x03 is not TLS", function() eq(ic.classify("\22\9"), nil) end)
+    test("classify: full h2 preface", function() eq(ic.classify(PREFACE), "h2c") end)
+    test("classify: h2 preface with frames after it", function() eq(ic.classify(PREFACE .. "\0\0\18\4"), "h2c") end)
+    test("classify: partial h2 preface asks for more", function() eq(ic.classify("PRI * HTTP/2"), "more") end)
+    test("classify: HTTP/1 request passes through", function() eq(ic.classify("GET / HTTP/1.1\r\n"), nil) end)
+    test("classify: POST is not mistaken for PRI", function() eq(ic.classify("POST /x HTTP/1.1"), nil) end)
+    test("classify: nothing yet asks for more", function() eq(ic.classify(""), "more") end)
+
+    test("grpc_status: trailer code", function() eq(ic.grpc_status("200", "0", nil), "grpc_0") end)
+    test("grpc_status: trailers-only error in headers", function() eq(ic.grpc_status("200", nil, "14"), "grpc_14") end)
+    test("grpc_status: trailer wins over header", function() eq(ic.grpc_status("200", "5", "0"), "grpc_5") end)
+    test("grpc_status: empty strings count as missing", function() eq(ic.grpc_status("200", "", "3"), "grpc_3") end)
+    test("grpc_status: no code keeps http status", function() eq(ic.grpc_status("200", nil, nil), "200") end)
+    test("grpc_status: transport failure keeps http status", function() eq(ic.grpc_status("502", nil, nil), "502") end)
+
+    test("is_grpc: plain and suffixed", function()
+        eq(ic.is_grpc("application/grpc"), true); eq(ic.is_grpc("application/grpc+proto"), true)
+        eq(ic.is_grpc("Application/GRPC; charset=utf-8"), true)
+    end)
+    test("is_grpc: grpc-web and others are not", function()
+        eq(ic.is_grpc("application/grpc-web"), false); eq(ic.is_grpc("application/grpc-web+proto"), false)
+        eq(ic.is_grpc("application/json"), false); eq(ic.is_grpc(nil), false)
+    end)
+
+    test("should: only when connect_tunnel marked it", function()
+        eq(ic.should(), false)
+        ngx.ctx.intercepted = true
+        eq(ic.should(), true)
+    end)
+    _G.ngx = saved_ngx
+end
+
+-- intercept_origin: search-domain expansion for short Service names. The
+-- module needs OpenResty libs at load; stub them, test only the pure helpers.
+do
+    local stubs = { "resty.dns.resolver", "ngx.balancer", "resty.lrucache" }
+    for _, m in ipairs(stubs) do
+        package.preload[m] = function() return { new = function() return {} end } end
+    end
+    package.loaded["intercept_origin"] = nil
+    local io_ = require("intercept_origin")
+    package.loaded["intercept_origin"] = nil
+    for _, m in ipairs(stubs) do package.preload[m] = nil; package.loaded[m] = nil end
+
+    local RESOLV = "nameserver 169.254.25.10\nsearch shop.svc.cluster.local svc.cluster.local cluster.local\noptions ndots:5\n"
+    test("origin: resolv.conf search list", function()
+        same(io_._read_search(RESOLV), { "shop.svc.cluster.local", "svc.cluster.local", "cluster.local" })
+    end)
+    test("origin: no resolv.conf, no search", function() eq(#io_._read_search(nil), 0) end)
+    local S = { "shop.svc.cluster.local", "svc.cluster.local", "cluster.local" }
+    test("origin: name as given first, then search list", function()
+        same(io_._candidates("orders-grpc.orders", S), {
+            "orders-grpc.orders",
+            "orders-grpc.orders.shop.svc.cluster.local",
+            "orders-grpc.orders.svc.cluster.local",
+            "orders-grpc.orders.cluster.local" })
+    end)
+    test("origin: trailing dot is absolute", function()
+        same(io_._candidates("api.example.com.", S), { "api.example.com" })
+    end)
+    test("origin: ip is used as is", function()
+        same(io_._candidates("10.20.0.5", S), { "10.20.0.5" })
+    end)
+end
+
+-- connect_tunnel: target parsing (the relay itself needs nginx; it is covered
+-- by the image smoke tests).
+do
+    package.loaded["connect_tunnel"] = nil
+    local ct = require("connect_tunnel")
+    package.loaded["connect_tunnel"] = nil
+    test("tunnel: split host:port", function()
+        local h, p = ct._split_target("api.example.com:8443"); eq(h, "api.example.com"); eq(p, 8443)
+    end)
+    test("tunnel: split terminator", function()
+        local h, p = ct._split_target("127.0.0.1:3130"); eq(h, "127.0.0.1"); eq(p, 3130)
     end)
 end
 

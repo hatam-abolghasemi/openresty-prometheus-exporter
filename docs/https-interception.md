@@ -1,8 +1,18 @@
-# https interception — see inside outbound HTTPS
+# https interception — see inside outbound HTTPS and gRPC
 
-Turn outbound HTTPS from an opaque `CONNECT host:port` line into the **real**
+Turn every outbound `CONNECT` tunnel that carries HTTP into the **real**
 method, route, and status — `GET /v2/orders → 404` instead of just
-`CONNECT api.internal:443 → 200`.
+`CONNECT api.internal:443 → 200`, and `/orders.v1.Orders/Get → grpc_5` instead
+of `CONNECT orders:9000 → 200`. Outbound then reads like inbound.
+
+What is decoded, with nothing configured per port or per host:
+
+| Inside the tunnel | Recorded as |
+|---|---|
+| HTTPS, on **any** port | method, route, status |
+| gRPC over TLS, on any port | `POST /package.Service/Method`, `grpc_<code>` |
+| plaintext gRPC (h2c) | `POST /package.Service/Method`, `grpc_<code>` |
+| anything else | `CONNECT host:port`, unchanged |
 
 This is **TLS interception** (a MITM of your app's own egress, inside your own
 trust domain). It is off by default and enabled per deployment. Read the
@@ -17,18 +27,25 @@ Independent of [inbound](inbound.md) and [stream](stream.md).
 ## How it works
 
 ```
-app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :3129 TLS terminator
-                                                           │ mints a leaf cert for "api"
-                                                           │ signed by YOUR CA (per-SNI)
-                                                           │ decrypts, records the request
-                                                           └─▶ re-originates to api:443 over
-                                                               VERIFIED TLS (proxy_ssl_verify on)
+app ──CONNECT api:443──▶ :3128 ──first bytes?──┬─ TLS ────▶ :3129 TLS terminator
+                                               │              │ mints a leaf cert for "api"
+                                               │              │ signed by YOUR CA (per-SNI)
+                                               │              │ decrypts, records the request
+                                               │              └─▶ re-originates to api:443 over
+                                               │                  VERIFIED TLS
+                                               ├─ HTTP/2 ─▶ :3130 h2c terminator (plaintext gRPC)
+                                               │              └─▶ records each call, forwards it
+                                               └─ other ──▶ real target, unchanged
 ```
 
 1. The app opens `CONNECT api:443` as usual (outbound).
-2. [`intercept.should()`](modules.md#interceptlua) decides, per CONNECT, whether
-   this is an intercepted port on a non-bypassed host. If yes, `:3128` tunnels
-   it to the local terminator `127.0.0.1:3129` instead of the real host.
+2. `:3128` answers `200 Connection Established` and reads the first bytes the
+   app sends into the tunnel ([`connect_tunnel`](modules.md#connect_tunnellua)).
+   The protocol announces itself there: a TLS ClientHello starts `0x16 0x03`,
+   HTTP/2 starts with its fixed preface. Those bytes are already on the wire
+   when they are read — TLS and HTTP clients speak first — so the decision adds
+   no wait. TLS goes to `127.0.0.1:3129`, HTTP/2 to `127.0.0.1:3130`, anything
+   else to the real target, as `tunnel_pass` would.
 3. `:3129` ([`optional/intercept.conf`](../docker/optional/intercept.conf) +
    [`tls_intercept`](modules.md#tls_interceptlua)) terminates the TLS using a
    leaf certificate **minted on the fly for the requested SNI**, signed by a CA
@@ -40,7 +57,18 @@ app ──CONNECT api:443──▶ :3128 ──(intercepted port?)──▶ :312
    are kept alive and pooled **per hostname**
    ([`intercept_origin`](modules.md#intercept_originlua)), so an intercepted
    request costs no extra round trips to the destination once a connection to
-   it is warm.
+   it is warm. `:3129` speaks HTTP/2 or HTTP/1.1, as the app's client offers;
+   gRPC calls (`content-type: application/grpc`) are forwarded with
+   `grpc_pass` over verified TLS, everything else with `proxy_pass`.
+5. `:3130` does the same for **plaintext gRPC**: it speaks HTTP/2 with prior
+   knowledge (what a gRPC client sends once its tunnel is up), records each
+   call and forwards it with `grpc_pass`. No CA is involved — there is nothing
+   to decrypt.
+6. Every decoded call is recorded once, on its terminator; the outer `CONNECT`
+   is not recorded again. For gRPC, `route` is the method path, kept as is,
+   and `status` is `grpc_<code>` from `grpc-status` (`grpc_0` OK, `grpc_14`
+   UNAVAILABLE, …); a non-200 HTTP status (nginx or transport failure) is kept
+   as is.
 
 The whole machinery ships in the image. A deployment enables it with
 one env var plus a mounted CA — no config file changes.
@@ -92,9 +120,8 @@ Optional env:
 
 | Env | Default | Meaning |
 |---|---|---|
-| `INTERCEPT_TLS` | unset (off) | `on` enables interception |
-| `INTERCEPT_TLS_PORTS` | `443` | Comma list of TLS ports to intercept |
-| `INTERCEPT_BYPASS` | (none) | Comma list of hosts to **never** intercept (mTLS / cert-pinned destinations) |
+| `INTERCEPT_TLS` | unset (off) | `on` enables interception: every CONNECT is classified and decoded as above |
+| `INTERCEPT_BYPASS` | (none) | Comma list of hosts to **never** intercept (mTLS / cert-pinned destinations); their CONNECTs use nginx's native tunnel |
 
 `INTERCEPT_TLS` is read once, when the container starts, and decides whether
 the `:3129` terminator is loaded at all; the others are read once per worker.
@@ -133,9 +160,9 @@ How you trust it differs per runtime — this is the only language-specific step
 
 > **Replace vs append matters.** The "replace" mechanisms make the client trust
 > **only** your CA. That's complete *as long as every TLS destination the client
-> reaches is intercepted* (proxy-only egress, all on an intercepted port,
-> nothing bypassed). If the same client also reaches TLS you *don't* intercept
-> (a bypassed host, a non-443 TLS port), give it a **combined** bundle (system
+> reaches is intercepted* (proxy-only egress, nothing bypassed). If the same
+> client also reaches TLS you *don't* intercept (a bypassed host, or TLS that
+> doesn't go through the proxy), give it a **combined** bundle (system
 > CAs + your CA) or use an appending mechanism — otherwise those calls fail
 > verification.
 
@@ -231,12 +258,23 @@ same discipline.
 
 ## Scope & limits
 
-- Only ports in `INTERCEPT_TLS_PORTS` (default `443`) are intercepted; every
-  other TLS port falls through to outbound's `CONNECT host:port` view. To
-  intercept another port, add it there: `:3129` re-originates on the port the
-  app addressed (taken from its `Host` header, `443` when absent).
-- Bypassed hosts and non-intercepted ports always show the CONNECT-style line —
-  that's intended, not a failure.
+- TLS is intercepted on whatever port it uses; `:3129` re-originates on the
+  port the app addressed (taken from its `Host` header, `443` when absent).
+  Plaintext gRPC is re-originated on its `:authority` port (`80` when absent).
+- Bypassed hosts, and tunnels that carry neither TLS nor HTTP/2, always show the
+  CONNECT-style line — that's intended, not a failure.
+- With interception on, CONNECTs are relayed by a Lua copy loop
+  ([`connect_tunnel`](modules.md#connect_tunnellua)) instead of nginx's native
+  tunnel; bypassed hosts and interception off keep the native one.
+- h2c through `:3130` is forwarded with `grpc_pass`: a non-gRPC HTTP/2-cleartext
+  client behind the proxy (rare) should be listed in `INTERCEPT_BYPASS`.
+- `:3128` answers `200` before it connects to the destination (it must read the
+  tunnel's first bytes to choose it). An unreachable destination then closes the
+  tunnel instead of answering `502`; the CONNECT metric still shows `502` (the
+  access log shows the `200` that was sent).
+- A TLS tunnel that doesn't carry HTTP — a database or broker over TLS reached
+  through the proxy — goes to `:3129` too and fails there. Such clients rarely
+  use an HTTP proxy; if one does, list its host in `INTERCEPT_BYPASS`.
 - Minted leaf certs are cached per SNI in `ssl_shared_dict ssl_mint_cache`
   (`cert_ttl` seconds, default 1 day). One leaf key is shared across hosts (as
   mitmproxy does); see [`tls_intercept`](modules.md#tls_interceptlua).
@@ -251,7 +289,7 @@ same discipline.
 | Symptom | Cause / fix |
 |---|---|
 | App: `SSL certificate problem: unable to get local issuer certificate` | The app doesn't trust your CA — the trust step (3) isn't applied, or applied to a client that reads a different bundle. For curl test manually: `curl --cacert /etc/intercept/ca.crt https://host/` |
-| Metrics still show `method="CONNECT"` | Interception didn't fire: `INTERCEPT_TLS` not `on`, CA not mounted, port not in `INTERCEPT_TLS_PORTS`, host is in `INTERCEPT_BYPASS`, or the container's `command:` skipped the entrypoint (log line `intercept.conf isn't loaded`; see step 2) |
+| Metrics still show `method="CONNECT"` | Interception didn't fire: `INTERCEPT_TLS` not `on`, CA not mounted, host is in `INTERCEPT_BYPASS`, the tunnel carries neither TLS nor HTTP/2, or the container's `command:` skipped the entrypoint (log line `intercept.conf isn't loaded`; see step 2) |
 | Container exits with `INTERCEPT_TLS=on but /etc/nginx/conf.d/intercept.conf can't be created` | `conf.d/` is read-only (a whole-directory ConfigMap mount, or `readOnlyRootFilesystem`). Mount your `default.conf` with `subPath` so `conf.d/` stays writable |
 | `502`/`504` on a specific host after enabling | Re-origination's `proxy_ssl_verify` rejected the real cert (good — bad/expired upstream cert), **or** egress to that host is blocked. Check `kubectl logs <pod> -c nginx` for `certificate verify failed` vs a connect timeout |
 | `CONNECT tunnel failed, response 500` right after enabling | A Lua error on the `:3129` leg — almost always a CA read/parse problem. `kubectl logs <pod> -c nginx` will have a `tls_intercept:` line naming it (can't read CA, parse failure). `Permission denied` on `ca.key` means the file isn't readable by the nginx workers (they don't run as root): keep the Secret's default `0644`, or set `defaultMode` accordingly |

@@ -246,11 +246,12 @@ end
 -- log_by_lua_block -- record request/response/connection metrics
 -- ============================================================
 function _M.record()
-    -- A CONNECT we intercept is handed to the :3129 terminator, which records
-    -- the decrypted request in full (method, route, status, timing). Skip the
-    -- opaque outer CONNECT here so each call is counted exactly once. The same
-    -- decision drives tunnel routing in default.conf, so the two never diverge.
-    if require("intercept").should() then return end
+    -- A CONNECT handed to a terminator (:3129 TLS, :3130 plaintext gRPC) is
+    -- recorded there in full (method, route, status, timing). Skip the opaque
+    -- outer CONNECT here so each call is counted exactly once; connect_tunnel
+    -- marks the request when it routes it, so the two never diverge.
+    local intercept = require("intercept")
+    if intercept.should() then return end
 
     -- outbound master switch: skip recording entirely for outbound (mode=1)
     -- traffic when disabled in metrics_config.apps.outbound -- the proxy itself
@@ -264,7 +265,22 @@ function _M.record()
     end
 
     local method   = ngx.var.request_method or "UNKNOWN"
-    local status   = ngx.var.status or "000"
+    -- a CONNECT relayed by connect_tunnel reports a failed tunnel via ngx.ctx
+    local status   = ngx.ctx.tunnel_status or ngx.var.status or "000"
+
+    -- gRPC (outbound, decoded on :3129 or :3130): the real result is
+    -- grpc-status, not the HTTP status (see intercept.grpc_status), and the
+    -- path is /package.Service/Method -- a finite set the route sanitizer
+    -- would mangle (a "v1" in a package looks like an id), so it is kept as is.
+    local grpc = request_mode == "1" and intercept.is_grpc(ngx.var.content_type)
+    if grpc then
+        status = intercept.grpc_status(status, ngx.var.upstream_trailer_grpc_status,
+                                       ngx.var.upstream_http_grpc_status)
+    end
+    local route
+    if cfg.label_route then
+        route = grpc and (ngx.var.uri or "/") or route_sanitizer.sanitize(ngx.var.request_uri, cfg.sanitize)
+    end
     local req_time = tonumber(ngx.var.request_time) or 0
     local req_size = tonumber(ngx.var.request_length) or 0
     local res_size = tonumber(ngx.var.body_bytes_sent) or 0
@@ -273,7 +289,7 @@ function _M.record()
     -- (400, 413, `deny`); build_labels() turns them into "unknown"
     local labels = build_labels{
         method           = method,
-        route            = cfg.label_route and route_sanitizer.sanitize(ngx.var.request_uri, cfg.sanitize) or nil,
+        route            = route,
         status           = status,
         client_subnet    = cfg.label_client_subnet and client_subnet.mask(ngx.var.http_x_forwarded_for or ngx.var.remote_addr) or nil,
         host             = cfg.label_host and host_classifier.classify(ngx.var.host, cfg.cluster_ip_prefix) or nil,

@@ -71,7 +71,7 @@ Turn on only what you need. Click through for the step-by-step guide.
 |---|---|---|---|
 | [**inbound**](docs/inbound.md) | Request metrics for traffic into your app | run the image | — |
 | [**outbound**](docs/outbound.md) | Egress metrics (HTTPS as `CONNECT host:port`) | `HTTP(S)_PROXY=127.0.0.1:3128` on the app | — |
-| [**https interception**](docs/https-interception.md) | Real route/status inside outbound HTTPS | `INTERCEPT_TLS=on` + a CA | outbound |
+| [**https interception**](docs/https-interception.md) | Real route/status inside outbound HTTPS (any port) and gRPC (TLS or plaintext) | `INTERCEPT_TLS=on` + a CA | outbound |
 | [**stream**](docs/stream.md) | TCP/UDP (Redis, DB…) from the app's side | a `stream.conf` | — |
 
 ```

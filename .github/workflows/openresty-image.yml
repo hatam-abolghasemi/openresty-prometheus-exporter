@@ -270,6 +270,48 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test gRPC interception (plaintext, detected)
+        if: steps.smoke-build.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          ca="$RUNNER_TEMP/intercept-ca"   # created by the https interception step
+          docker network create smoke-grpc-net
+          # plaintext gRPC server with reflection on :9000
+          docker run -d --name smoke-grpcbin --network smoke-grpc-net --network-alias grpcbin moul/grpcbin
+          # nothing gRPC-specific is configured: the tunnel's first bytes decide
+          docker run -d --name smoke-grpc --network smoke-grpc-net -e INTERCEPT_TLS=on \
+            -v "$ca/ca.crt:/etc/nginx/intercept/ca.crt:ro" \
+            -v "$ca/ca.key:/etc/nginx/intercept/ca.key:ro" \
+            openresty-prometheus:smoke
+          docker exec smoke-grpc nginx -T 2>/dev/null | grep -q '127.0.0.1:3130'
+          # grpc-go dials through HTTPS_PROXY for every target, plaintext included
+          grpc() { docker run --rm --network container:smoke-grpc -e HTTPS_PROXY=http://127.0.0.1:3128 fullstorydev/grpcurl -plaintext -max-time 10 "$@"; }
+          probe() { docker run --rm --network container:smoke-grpc curlimages/curl -sS --retry 10 --retry-connrefused --retry-delay 1 -m 15 "$@"; }
+          probe -o /dev/null http://127.0.0.1:9145/healthz
+
+          ok=false
+          for _ in $(seq 1 15); do
+            if grpc -d '{"greeting":"smoke"}' grpcbin:9000 hello.HelloService/SayHello; then ok=true; break; fi
+            sleep 1
+          done
+          $ok || { echo "::error::gRPC call through the proxy failed"; exit 1; }
+          # a call that fails with NOT_FOUND (5): grpcurl exits non-zero by design
+          grpc -d '{"code":5,"reason":"smoke"}' grpcbin:9000 grpcbin.GRPCBin/SpecificError || true
+
+          # https through the same detecting tunnel still works
+          docker run --rm --network container:smoke-grpc -v "$ca/ca.crt:/ca.crt:ro" curlimages/curl -sS -m 15 \
+            --cacert /ca.crt -o /dev/null -x http://127.0.0.1:3128 https://example.com/
+
+          metrics=$(probe http://127.0.0.1:9145/metrics)
+          echo "$metrics" | grep 'host="grpcbin"'
+          echo "$metrics" | grep -q 'method="POST",route="/hello.HelloService/SayHello",status="grpc_0",host="grpcbin",mode="1"'
+          echo "$metrics" | grep -q 'route="/grpcbin.GRPCBin/SpecificError",status="grpc_5"'
+          echo "$metrics" | grep -q 'method="GET",route="/",status="200",host="example.com",mode="1"'
+          if echo "$metrics" | grep -q 'method="CONNECT"'; then
+            echo "::error::a decoded call was also recorded as a CONNECT"
+            exit 1
+          fi
+
       - name: Smoke test METRICS_CONFIG
         if: steps.smoke-build.outputs.run == 'true'
         run: |
@@ -294,7 +336,7 @@ jobs:
         if: always() && steps.smoke-build.outputs.run == 'true'
         run: |
           fatal=0
-          for c in smoke-nginx smoke-intercept smoke-envcfg; do
+          for c in smoke-nginx smoke-intercept smoke-grpc smoke-envcfg; do
             docker logs "$c" > /dev/null 2>&1 || continue
             echo "::group::$c"
             docker logs "$c" 2>&1 | tail -n 100

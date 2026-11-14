@@ -130,16 +130,20 @@ server {
     log_by_lua_block    { require("http_metrics").record() }
 
     location / {
+        set_by_lua_block $connect_mode     { return require("intercept").connect_mode() }
         set_by_lua_block $connect_upstream { return require("intercept").upstream() }
-        if ($request_method = CONNECT) { tunnel_pass $connect_upstream; }  # HTTPS tunnel
-        proxy_pass http://$http_host$request_uri;                          # plain HTTP
+        if ($connect_mode = detect) { content_by_lua_block { require("connect_tunnel").run() } }  # interception on
+        if ($connect_mode = tunnel) { tunnel_pass $connect_upstream; }                            # HTTPS tunnel
+        proxy_pass http://$http_host$request_uri;                                                 # plain HTTP
     }
 }
 ```
 
-The `$connect_upstream` indirection is the *only* hook https interception
-needs — with it off, [`intercept.upstream()`](modules.md#interceptlua) returns the real
-`host:port`, so this behaves exactly like a bare `tunnel_pass;`.
+The `$connect_mode` branch is the *only* hook interception needs — with it off,
+[`intercept.connect_mode()`](modules.md#interceptlua) is `"tunnel"` for every
+CONNECT and `upstream()` the real `host:port`, so this behaves exactly like a
+bare `tunnel_pass;`. With it on, [`connect_tunnel`](modules.md#connect_tunnellua)
+relays the CONNECT and decodes TLS and gRPC by the tunnel's first bytes.
 
 ---
 

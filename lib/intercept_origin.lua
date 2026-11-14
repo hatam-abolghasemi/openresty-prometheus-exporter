@@ -1,7 +1,8 @@
 -- intercept_origin.lua
--- Re-origination for the https interception server (127.0.0.1:3129 in
--- docker/optional/intercept.conf): sends each decrypted request on to its real
--- destination over a pooled, verified TLS connection instead of a fresh one.
+-- Re-origination for the interception servers in docker/optional/intercept.conf
+-- -- TLS on 127.0.0.1:3129 and plaintext gRPC on 127.0.0.1:3130: sends each
+-- decoded request on to its real destination over a pooled connection
+-- (verified TLS for :3129) instead of a fresh one.
 --
 -- Without it, :3129 used `proxy_pass https://$host...`, which keeps no pool:
 -- every intercepted request paid a TCP + TLS handshake to the destination
@@ -43,10 +44,48 @@ local _M = {}
 -- that the previous config used.
 local dns_cache = lrucache.new(1000)
 
-local function split_host_port(hh)
+-- The pod's search domains, read once from /etc/resolv.conf.
+-- resty.dns.resolver queries names verbatim, but apps (gRPC targets above
+-- all) often use short Service names like `orders-grpc.orders` that only
+-- resolve through the search list, as they would for the app's own libc.
+local function read_search(content)
+    local search = {}
+    for line in (content or ""):gmatch("[^\r\n]+") do
+        local list = line:match("^%s*search%s+(.+)$") or line:match("^%s*domain%s+(%S+)")
+        if list then
+            search = {}
+            for d in list:gmatch("%S+") do search[#search + 1] = d end
+        end
+    end
+    return search
+end
+
+-- Names to try for `host`, in order: the name as given first, then with each
+-- search domain. Unlike glibc's ndots rule (search domains first for names
+-- with fewer than ndots dots, 5 in Kubernetes), a full external name like
+-- api.example.com costs one query, not three NXDOMAINs before it; a short
+-- Service name costs one NXDOMAIN before its search-domain match. A trailing
+-- dot or an IP means exactly that name.
+local function candidates(host, search)
+    if host:match("^%d+%.%d+%.%d+%.%d+$") then return { host } end
+    if host:sub(-1) == "." then return { host:sub(1, -2) } end
+    local out = { host }
+    for _, d in ipairs(search) do out[#out + 1] = host .. "." .. d end
+    return out
+end
+
+local SEARCH
+do
+    local f = io.open("/etc/resolv.conf", "r")
+    local content = f and f:read("*a")
+    if f then f:close() end
+    SEARCH = read_search(content)
+end
+
+local function split_host_port(hh, default_port)
     local host, port = hh:match("^([^:]+):(%d+)$")
     if not host then host = hh end
-    return host:lower(), tonumber(port) or 443
+    return host:lower(), tonumber(port) or default_port
 end
 
 local function lookup(host)
@@ -62,28 +101,36 @@ local function lookup(host)
     }
     if not r then return nil, "resolver: " .. tostring(err) end
 
-    local answers, qerr = r:query(host, { qtype = r.TYPE_A })
-    if not answers then return nil, "query: " .. tostring(qerr) end
-    if answers.errcode then
-        return nil, "query: " .. tostring(answers.errcode) .. " " .. tostring(answers.errstr)
-    end
-    for _, ans in ipairs(answers) do
-        if ans.type == r.TYPE_A and ans.address then
-            dns_cache:set(host, ans.address, DNS_CACHE_TTL)
-            return ans.address
+    -- Walk the search-list candidates; a name that doesn't exist (or has no
+    -- A record) moves on to the next, a transport error stops the walk.
+    local last_err = "no A record"
+    for _, name in ipairs(candidates(host, SEARCH)) do
+        local answers, qerr = r:query(name, { qtype = r.TYPE_A })
+        if not answers then return nil, "query " .. name .. ": " .. tostring(qerr) end
+        if answers.errcode then
+            last_err = "query " .. name .. ": " .. tostring(answers.errcode) .. " " .. tostring(answers.errstr)
+        else
+            for _, ans in ipairs(answers) do
+                if ans.type == r.TYPE_A and ans.address then
+                    dns_cache:set(host, ans.address, DNS_CACHE_TTL)
+                    return ans.address
+                end
+            end
         end
     end
-    return nil, "no A record"
+    return nil, last_err
 end
 
 -- Access phase: pick and resolve the destination, stash it for balance().
-function _M.resolve()
+-- default_port applies when the Host header (gRPC: :authority) has no port:
+-- 443 for https (the default), 80 for plaintext gRPC.
+function _M.resolve(default_port)
     local hh = ngx.var.http_host
     if not hh or hh == "" then
         ngx.log(ngx.ERR, "intercept_origin: request without Host header")
         return ngx.exit(ngx.HTTP_BAD_REQUEST)
     end
-    local host, port = split_host_port(hh)
+    local host, port = split_host_port(hh, default_port or 443)
 
     local ip, err = lookup(host)
     if not ip then
@@ -115,5 +162,9 @@ function _M.balance()
     end
     balancer.enable_keepalive(POOL_IDLE_TIMEOUT, POOL_MAX_REQUESTS)
 end
+
+-- Pure helpers, exposed for tests/lib_test.lua.
+_M._read_search      = read_search
+_M._candidates       = candidates
 
 return _M

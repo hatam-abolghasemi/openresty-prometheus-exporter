@@ -173,6 +173,11 @@ return {
         dns_cache_ttl     = 10,     -- seconds a resolved address is reused (was `resolver valid=10s`)
         pool_idle_timeout = 60,     -- seconds an idle pooled connection to a destination is kept
         pool_max_requests = 10000,  -- requests per pooled connection before it is recycled
+
+        -- CONNECT relay while interception is on (lib/connect_tunnel.lua);
+        -- same meaning as tunnel_connect_timeout / tunnel_read_timeout
+        tunnel_connect_timeout = 10,   -- seconds to reach the destination
+        tunnel_idle_timeout    = 300,  -- seconds a tunnel may sit idle in either direction
     },
 
     stream = {
